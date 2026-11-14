@@ -110,6 +110,7 @@ const els = {
   today: document.getElementById('today'),
   summary: document.getElementById('summary'),
   list: document.getElementById('list'),
+  listHead: document.getElementById('list-head'),
   skeleton: document.getElementById('skeleton'),
   empty: document.getElementById('empty'),
   emptyTitle: document.querySelector('#empty .empty-title'),
@@ -282,6 +283,7 @@ function render() {
   const isEmpty = !state.loading && visible.length === 0;
   els.empty.hidden = !isEmpty;
   els.list.hidden = state.loading || isEmpty;
+  els.listHead.hidden = state.loading || isEmpty;
 
   if (isEmpty) {
     if (!hasAny) {
@@ -315,6 +317,7 @@ function renderError(message) {
   state.loading = false;
   els.skeleton.hidden = true;
   els.list.hidden = true;
+  els.listHead.hidden = true;
   els.empty.hidden = true;
   els.error.hidden = false;
   els.errorSub.textContent = message;
@@ -331,6 +334,7 @@ async function load() {
   els.error.hidden = true;
   els.skeleton.hidden = false;
   els.list.hidden = true;
+  els.listHead.hidden = true;
   els.empty.hidden = true;
 
   try {
