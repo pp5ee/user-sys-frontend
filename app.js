@@ -2,8 +2,12 @@
 
 /* ------------------------------------------------------------------ *
  * 团队任务台 — 前端
- * 任务：GET /api/tasks · POST /api/tasks · PATCH /api/tasks/{id}
- * 用户：POST /api/auth/register · POST /api/auth/login
+ * 任务：GET /api/tasks（支持 ?q= 搜索）· POST /api/tasks
+ *       PATCH /api/tasks/{id}（标题 / 负责人 / 优先级 / 状态）
+ *       DELETE /api/tasks/{id}
+ *       GET /api/tasks/{id}/comments · POST /api/tasks/{id}/comments
+ * 用户：GET /api/users
+ *       POST /api/auth/register · POST /api/auth/login
  *       GET  /api/auth/me       · POST /api/auth/logout
  * ------------------------------------------------------------------ */
 
@@ -21,7 +25,11 @@ const USERNAME_RE = /^[A-Za-z0-9_.-]+$/;
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 128;
 const DISPLAY_NAME_MAX = 50;
-const FIELD_LABEL = { username: '账号', password: '密码', display_name: '显示名' };
+const TASK_TITLE_MAX = 200;
+const ASSIGNEE_MAX = 50;
+const COMMENT_MAX = 1000;
+const SEARCH_DEBOUNCE = 260;
+const FIELD_LABEL = { username: '账号', password: '密码', display_name: '显示名', title: '标题', assignee: '负责人' };
 
 /* ---------------- 本地存储 ---------------- */
 
@@ -134,8 +142,11 @@ const API = {
 
   /* ---- 任务 ---- */
 
-  list() {
-    return this.request('/api/tasks');
+  list(params = {}) {
+    const query = new URLSearchParams();
+    if (params.q) query.set('q', params.q);
+    const suffix = query.toString();
+    return this.request('/api/tasks' + (suffix ? `?${suffix}` : ''));
   },
 
   create(payload) {
@@ -146,6 +157,27 @@ const API = {
     return this.request(`/api/tasks/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    });
+  },
+
+  remove(id) {
+    return this.request(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  /* ---- 协作用户 ---- */
+
+  users() {
+    return this.request('/api/users', { skipAuthRedirect: true });
+  },
+
+  comments(taskId) {
+    return this.request(`/api/tasks/${encodeURIComponent(taskId)}/comments`);
+  },
+
+  addComment(taskId, content) {
+    return this.request(`/api/tasks/${encodeURIComponent(taskId)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
     });
   },
 
@@ -204,14 +236,32 @@ function pickUser(body) {
   };
 }
 
+function myLabel() {
+  if (!auth.user) return '';
+  return String(auth.user.displayName || auth.user.username || '').trim();
+}
+
 /* ---------------- 状态 ---------------- */
 
 const state = {
   tasks: [],
   filter: 'all',
   query: '',
+  mine: false,
   loading: true,
   busy: new Set(),
+  loadSeq: 0,
+  searchTimer: 0,
+  users: [],
+  usersLoaded: false,
+  usersSignature: '',
+  detailId: null,
+  detailSnapshot: null,
+  savingDetail: false,
+  deleteArmed: false,
+  deleteTimer: 0,
+  comments: { taskId: null, status: 'idle', items: [] },
+  deepLinkChecked: false,
 };
 
 let focusTarget = null;
@@ -254,6 +304,10 @@ const els = {
   refresh: document.getElementById('refresh'),
   newTask: document.getElementById('new-task'),
   search: document.getElementById('search'),
+  searchBox: document.getElementById('search-box'),
+  searchClear: document.getElementById('search-clear'),
+  searchKbd: document.getElementById('search-kbd'),
+  mineFilter: document.getElementById('mine-filter'),
   tabs: Array.from(document.querySelectorAll('.tab')),
   foot: document.querySelector('.foot'),
   footText: document.getElementById('foot-text'),
@@ -268,6 +322,34 @@ const els = {
   submit: document.getElementById('dialog-submit'),
   close: document.getElementById('dialog-close'),
   cancel: document.getElementById('dialog-cancel'),
+
+  dialogDetail: document.getElementById('detail-dialog'),
+  detailForm: document.getElementById('detail-form'),
+  detailEyebrow: document.getElementById('detail-eyebrow'),
+  detailHeading: document.getElementById('detail-heading'),
+  dTitle: document.getElementById('d-title'),
+  dTitleCounter: document.getElementById('d-title-counter'),
+  dTitleError: document.getElementById('d-title-error'),
+  dAssignee: document.getElementById('d-assignee'),
+  dAssigneeError: document.getElementById('d-assignee-error'),
+  assignMe: document.getElementById('assign-me'),
+  detailMeta: document.getElementById('detail-meta'),
+  detailCopy: document.getElementById('detail-copy'),
+  detailDelete: document.getElementById('detail-delete'),
+  detailSave: document.getElementById('detail-save'),
+  detailClose: document.getElementById('detail-close'),
+  detailCancel: document.getElementById('detail-cancel'),
+  commentList: document.getElementById('comment-list'),
+  commentCount: document.getElementById('comment-count'),
+  commentEmpty: document.getElementById('comment-empty'),
+  commentBlocked: document.getElementById('comment-blocked'),
+  commentLogin: document.getElementById('comment-login'),
+  commentCompose: document.getElementById('comment-compose'),
+  commentInput: document.getElementById('comment-input'),
+  commentLimit: document.getElementById('comment-limit'),
+  commentSend: document.getElementById('comment-send'),
+  assigneeOptions: document.getElementById('assignee-options'),
+
   toasts: document.getElementById('toasts'),
   rowTemplate: document.getElementById('row-template'),
 };
@@ -317,6 +399,15 @@ function toast(message, kind = 'ok') {
   }, kind === 'error' ? 4200 : 2600);
 }
 
+function taskMatchesMine(task) {
+  const me = myLabel();
+  if (!me) return false;
+  const assignee = String(task.assignee || '').trim();
+  if (!assignee) return false;
+  if (assignee === me) return true;
+  return Boolean(auth.user && auth.user.username && assignee === auth.user.username);
+}
+
 /* ---------------- 登录页 / 任务台 切换 ---------------- */
 
 function setAuthMode(mode) {
@@ -347,6 +438,8 @@ function showAuth(message = '') {
   els.logout.hidden = true;
   els.userChip.hidden = true;
   els.notice.hidden = true;
+  closeDetail();
+  closeDialog();
   setAuthError(message);
   setTimeout(() => els.fUsername.focus(), 0);
 }
@@ -361,6 +454,8 @@ function renderUserChip() {
     els.userAvatar.style.background = avatarColor(name);
     els.logout.hidden = false;
     els.notice.hidden = true;
+    els.mineFilter.hidden = false;
+    els.assignMe.hidden = false;
   } else if (auth.mode === 'unavailable') {
     els.userChip.hidden = false;
     els.userName.textContent = '匿名访问';
@@ -369,11 +464,18 @@ function renderUserChip() {
     els.userAvatar.style.background = '#8b8b81';
     els.logout.hidden = true;
     els.notice.hidden = false;
+    els.mineFilter.hidden = true;
+    els.assignMe.hidden = true;
+    state.mine = false;
   } else {
     els.userChip.hidden = true;
     els.logout.hidden = true;
     els.notice.hidden = true;
+    els.mineFilter.hidden = true;
+    els.assignMe.hidden = true;
+    state.mine = false;
   }
+  els.mineFilter.setAttribute('aria-pressed', String(state.mine));
 }
 
 function showApp() {
@@ -382,6 +484,7 @@ function showApp() {
   renderUserChip();
   els.today.textContent = todayLabel();
   load();
+  ensureUsers();
 }
 
 function enterSession(body) {
@@ -391,6 +494,7 @@ function enterSession(body) {
   if (user) auth.user = user;
   auth.mode = 'ready';
   saveSession();
+  renderUserChip();
 }
 
 function expireSession(message) {
@@ -526,6 +630,12 @@ async function logout() {
     clearSession();
     auth.mode = 'anonymous';
     state.tasks = [];
+    state.query = '';
+    state.mine = false;
+    state.users = [];
+    state.usersLoaded = false;
+    els.search.value = '';
+    updateSearchChrome();
     setAuthMode('login');
     showAuth(wasReady ? '已退出登录。' : '');
     toast('已退出登录');
@@ -572,10 +682,12 @@ function visibleTasks() {
   const query = state.query.trim().toLowerCase();
   return state.tasks.filter((task) => {
     if (state.filter !== 'all' && task.status !== state.filter) return false;
+    if (state.mine && !taskMatchesMine(task)) return false;
     if (!query) return true;
     return (
-      String(task.title).toLowerCase().includes(query) ||
-      String(task.assignee).toLowerCase().includes(query)
+      String(task.title || '').toLowerCase().includes(query) ||
+      String(task.assignee || '').toLowerCase().includes(query) ||
+      String(task.creator || '').toLowerCase().includes(query)
     );
   });
 }
@@ -585,13 +697,23 @@ function buildRow(task) {
   node.dataset.id = String(task.id);
   node.dataset.status = task.status;
 
-  node.querySelector('.task-title').textContent = task.title;
-  node.querySelector('.task-meta').textContent = `更新于 ${relativeTime(task.updated_at)}`;
-  node.querySelector('.task-meta').title = fullTime(task.updated_at);
+  const open = node.querySelector('.task-open');
+  open.textContent = task.title;
+  open.dataset.focus = `open:${task.id}`;
+  open.title = '打开任务详情';
+  open.setAttribute('aria-label', `打开任务「${task.title}」`);
+
+  const meta = [];
+  meta.push(`#${task.id}`);
+  if (task.creator) meta.push(`创建人 ${task.creator}`);
+  if (task.updated_at) meta.push(`更新于 ${relativeTime(task.updated_at)}`);
+  const metaNode = node.querySelector('.task-meta');
+  metaNode.textContent = meta.join(' · ');
+  metaNode.title = task.updated_at ? fullTime(task.updated_at) : '';
 
   const avatar = node.querySelector('.avatar');
-  avatar.textContent = String(task.assignee).trim().charAt(0) || '?';
-  avatar.style.background = avatarColor(String(task.assignee));
+  avatar.textContent = String(task.assignee || '?').trim().charAt(0) || '?';
+  avatar.style.background = avatarColor(String(task.assignee || ''));
   node.querySelector('.assignee-name').textContent = task.assignee;
   node.querySelector('.assignee-name').title = task.assignee;
 
@@ -617,10 +739,15 @@ function buildRow(task) {
   revert.dataset.focus = `revert:${task.id}`;
   revert.setAttribute('aria-label', `把「${task.title}」退回`);
 
+  const edit = node.querySelector('.edit-btn');
+  edit.dataset.focus = `edit:${task.id}`;
+  edit.setAttribute('aria-label', `编辑「${task.title}」`);
+
   if (state.busy.has(task.id)) {
     node.classList.add('is-busy');
     statusChip.disabled = true;
     revert.disabled = true;
+    edit.disabled = true;
   }
 
   return node;
@@ -635,6 +762,8 @@ function render() {
     const badge = tab.querySelector('.tab-count');
     if (badge) badge.textContent = String(counts[key] ?? 0);
   }
+
+  els.mineFilter.setAttribute('aria-pressed', String(state.mine));
 
   const visible = visibleTasks();
   const fragment = document.createDocumentFragment();
@@ -663,15 +792,20 @@ function render() {
     if (!hasAny) {
       els.emptyTitle.textContent = '这里还没有任务';
       els.emptySub.textContent = '点右上角「新建任务」，把今天要做的事记下来。';
+    } else if (state.mine) {
+      els.emptyTitle.textContent = '没有分给你的任务';
+      els.emptySub.textContent = '新建任务时把负责人填成自己，或者等同事指派给你。';
     } else {
       els.emptyTitle.textContent = '没有符合条件的任务';
       els.emptySub.textContent = '换个筛选条件，或者清空搜索试试。';
     }
   }
 
-  if (hasAny) {
-    const doing = counts.doing;
-    els.summary.textContent = `共 ${counts.all} 条任务 · 待办 ${counts.todo} · 进行中 ${doing} · 完成 ${counts.done}`;
+  const query = state.query.trim();
+  if (query) {
+    els.summary.textContent = `搜索「${query}」匹配 ${visible.length} 条任务`;
+  } else if (hasAny) {
+    els.summary.textContent = `共 ${counts.all} 条任务 · 待办 ${counts.todo} · 进行中 ${counts.doing} · 完成 ${counts.done}`;
   } else if (!state.loading) {
     els.summary.textContent = '看今天有哪些事、谁在做、做到哪了。';
   }
@@ -680,6 +814,8 @@ function render() {
   const origin = API.base || location.origin;
   const who = auth.mode === 'ready' && auth.user ? ` · ${auth.user.displayName || auth.user.username}` : '';
   els.footText.textContent = `接口 ${origin}${who} · 更新于 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+
+  renderAssigneeOptions();
 
   if (focusTarget) {
     const target = document.querySelector(`[data-focus="${focusTarget}"]`);
@@ -701,30 +837,99 @@ function renderError(message) {
   for (const tab of els.tabs) tab.querySelector('.tab-count').textContent = '0';
 }
 
+/* ---------------- 团队成员 / 负责人候选 ---------------- */
+
+function extractItems(body) {
+  if (Array.isArray(body)) return body;
+  if (body && Array.isArray(body.items)) return body.items;
+  if (body && body.data) return extractItems(body.data);
+  return [];
+}
+
+async function ensureUsers(force = false) {
+  if (auth.mode !== 'ready') return;
+  if (state.usersLoaded && !force) return;
+  try {
+    const data = await API.users();
+    state.users = extractItems(data)
+      .map((user) => ({
+        ...user,
+        label: String(user.display_name || user.displayName || user.username || '').trim(),
+      }))
+      .filter((user) => user.label);
+  } catch {
+    state.users = [];
+  } finally {
+    state.usersLoaded = true;
+    renderAssigneeOptions();
+  }
+}
+
+function renderAssigneeOptions() {
+  if (!els.assigneeOptions) return;
+  const names = new Set();
+  for (const user of state.users) names.add(user.label);
+  for (const task of state.tasks) {
+    if (task.assignee) names.add(String(task.assignee).trim());
+  }
+  const me = myLabel();
+  if (me) names.add(me);
+
+  const list = [...names].filter(Boolean).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const signature = list.join('\u0001');
+  if (signature === state.usersSignature) return;
+  state.usersSignature = signature;
+
+  const fragment = document.createDocumentFragment();
+  for (const name of list) {
+    const option = document.createElement('option');
+    option.value = name;
+    fragment.appendChild(option);
+  }
+  els.assigneeOptions.replaceChildren(fragment);
+}
+
 /* ---------------- 数据 ---------------- */
 
-async function load() {
+async function load({ quiet = false } = {}) {
   if (auth.mode !== 'ready' && auth.mode !== 'unavailable') return;
 
-  state.loading = true;
-  els.refresh.disabled = true;
-  els.error.hidden = true;
-  els.skeleton.hidden = false;
-  els.list.hidden = true;
-  els.listHead.hidden = true;
-  els.empty.hidden = true;
+  const query = state.query.trim();
+  const seq = ++state.loadSeq;
+  state.loading = !quiet;
+
+  if (!quiet) {
+    els.refresh.disabled = true;
+    els.error.hidden = true;
+    els.skeleton.hidden = false;
+    els.list.hidden = true;
+    els.listHead.hidden = true;
+    els.empty.hidden = true;
+  }
 
   try {
-    const data = await API.list();
-    state.tasks = Array.isArray(data && data.items) ? data.items : [];
+    const data = await API.list(query ? { q: query } : {});
+    if (seq !== state.loadSeq) return;
+    if (query !== state.query.trim()) return; // 输入已经变了，等新的结果
+    state.tasks = extractItems(data);
     state.loading = false;
     render();
+    openDeepLink();
   } catch (err) {
+    if (seq !== state.loadSeq) return;
     if (err.status === 401 || err.status === 403) return; // 已回到登录页
+    if (quiet) {
+      // 搜索请求失败时保留现有数据，本地过滤仍然生效。
+      state.loading = false;
+      render();
+      return;
+    }
     renderError(err.message || '加载失败');
   } finally {
-    state.loading = false;
-    els.refresh.disabled = false;
+    if (seq === state.loadSeq) {
+      state.loading = false;
+      els.refresh.disabled = false;
+    }
   }
 }
 
@@ -749,6 +954,32 @@ async function changeStatus(task, next) {
   }
 }
 
+/* ---------------- 搜索 / 我负责的 ---------------- */
+
+function updateSearchChrome() {
+  const has = els.search.value.length > 0;
+  els.searchClear.hidden = !has;
+  els.searchKbd.hidden = has || document.activeElement === els.search;
+}
+
+function applySearch() {
+  state.query = els.search.value;
+  updateSearchChrome();
+  render();
+  clearTimeout(state.searchTimer);
+  state.searchTimer = setTimeout(() => load({ quiet: true }), SEARCH_DEBOUNCE);
+}
+
+function clearSearch() {
+  els.search.value = '';
+  state.query = '';
+  updateSearchChrome();
+  render();
+  clearTimeout(state.searchTimer);
+  load({ quiet: true });
+  els.search.focus();
+}
+
 /* ---------------- 新建任务 ---------------- */
 
 function setFieldError(input, errorNode, message) {
@@ -767,28 +998,29 @@ function resetDialog() {
   els.fTitle.value = '';
   els.fAssignee.value = '';
   // 负责人默认填自己，改成别人也可以
-  if (auth.mode === 'ready' && auth.user) {
-    els.fAssignee.value = auth.user.displayName || auth.user.username || '';
-  }
+  const me = myLabel();
+  if (me) els.fAssignee.value = me;
   const medium = els.form.querySelector('input[name="priority"][value="medium"]');
   if (medium) medium.checked = true;
   setFieldError(els.fTitle, els.titleError, '');
   setFieldError(els.fAssignee, els.assigneeError, '');
-  updateCounter(els.fTitle, els.titleCounter, 200);
-  updateCounter(els.fAssignee, els.assigneeCounter, 50);
+  updateCounter(els.fTitle, els.titleCounter, TASK_TITLE_MAX);
+  updateCounter(els.fAssignee, els.assigneeCounter, ASSIGNEE_MAX);
   els.submit.disabled = false;
   els.submit.textContent = '新建任务';
 }
 
 function openDialog() {
   resetDialog();
+  ensureUsers();
   if (typeof els.dialog.showModal === 'function') els.dialog.showModal();
   else els.dialog.setAttribute('open', '');
   els.fTitle.focus();
 }
 
 function closeDialog() {
-  if (typeof els.dialog.close === 'function') els.dialog.close();
+  if (!els.dialog) return;
+  if (typeof els.dialog.close === 'function' && els.dialog.open) els.dialog.close();
   else els.dialog.removeAttribute('open');
 }
 
@@ -807,8 +1039,8 @@ async function submitCreate(event) {
   if (!title) {
     setFieldError(els.fTitle, els.titleError, '标题不能为空');
     valid = false;
-  } else if (title.length > 200) {
-    setFieldError(els.fTitle, els.titleError, '标题最多 200 字');
+  } else if (title.length > TASK_TITLE_MAX) {
+    setFieldError(els.fTitle, els.titleError, `标题最多 ${TASK_TITLE_MAX} 字`);
     valid = false;
   } else {
     setFieldError(els.fTitle, els.titleError, '');
@@ -817,8 +1049,8 @@ async function submitCreate(event) {
   if (!assignee) {
     setFieldError(els.fAssignee, els.assigneeError, '负责人不能为空');
     valid = false;
-  } else if (assignee.length > 50) {
-    setFieldError(els.fAssignee, els.assigneeError, '负责人最多 50 字');
+  } else if (assignee.length > ASSIGNEE_MAX) {
+    setFieldError(els.fAssignee, els.assigneeError, `负责人最多 ${ASSIGNEE_MAX} 字`);
     valid = false;
   } else {
     setFieldError(els.fAssignee, els.assigneeError, '');
@@ -834,24 +1066,521 @@ async function submitCreate(event) {
 
   try {
     const task = await API.create({ title, assignee, priority });
+    const wasFiltered = Boolean(state.query.trim()) || state.mine;
     state.tasks.unshift(task);
     state.filter = 'all';
     state.query = '';
+    state.mine = false;
     els.search.value = '';
+    updateSearchChrome();
     flashId = task.id;
     closeDialog();
     render();
+    renderUserChip();
     toast('任务已创建');
+    if (wasFiltered) load({ quiet: true });
   } catch (err) {
     if (err.status === 401 || err.status === 403) return; // 已回到登录页
     const fields = err.fields || {};
-    if (fields.title) setFieldError(els.fTitle, els.titleError, fields.title);
-    if (fields.assignee) setFieldError(els.fAssignee, els.assigneeError, fields.assignee);
+    if (fields.title) setFieldError(els.fTitle, els.titleError, translateFieldMessage(fields.title));
+    if (fields.assignee) setFieldError(els.fAssignee, els.assigneeError, translateFieldMessage(fields.assignee));
     if (!fields.title && !fields.assignee) toast(err.message || '创建失败', 'error');
     else toast('请检查填写内容', 'error');
   } finally {
     els.submit.disabled = false;
     els.submit.textContent = '新建任务';
+  }
+}
+
+/* ---------------- 任务详情：编辑 / 指派 / 删除 ---------------- */
+
+function currentDetailTask() {
+  if (state.detailId === null) return null;
+  return state.tasks.find((task) => String(task.id) === String(state.detailId)) || null;
+}
+
+function checkRadio(name, value) {
+  const input = els.detailForm.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (input) input.checked = true;
+}
+
+function radioValue(name) {
+  return els.detailForm.querySelector(`input[name="${name}"]:checked`)?.value || '';
+}
+
+function canDelete(task) {
+  if (auth.mode !== 'ready' || !auth.user) return false;
+  if (auth.user.role === 'admin') return true;
+  if (task.created_by === null || task.created_by === undefined) return false;
+  return String(task.created_by) === String(auth.user.id);
+}
+
+function syncHash(id) {
+  try {
+    history.replaceState(null, '', `${location.pathname}${location.search}#task-${id}`);
+  } catch { /* file:// 下个别浏览器不让改 */ }
+}
+
+function clearHash() {
+  if (!location.hash) return;
+  try {
+    history.replaceState(null, '', location.pathname + location.search);
+  } catch { /* 忽略 */ }
+}
+
+function openDeepLink() {
+  if (state.deepLinkChecked) return;
+  state.deepLinkChecked = true;
+  const match = location.hash.match(/^#task-(\d+)$/);
+  if (!match) return;
+  const task = state.tasks.find((item) => String(item.id) === match[1]);
+  if (task) openDetail(task, { focus: false });
+}
+
+function resetDeleteConfirm() {
+  clearTimeout(state.deleteTimer);
+  state.deleteArmed = false;
+  if (!els.detailDelete) return;
+  els.detailDelete.textContent = '删除任务';
+  els.detailDelete.classList.remove('is-armed');
+}
+
+function resetComments() {
+  state.comments = { taskId: null, status: 'idle', items: [] };
+  els.commentList.replaceChildren();
+  els.commentCount.textContent = '';
+  els.commentEmpty.hidden = true;
+  els.commentBlocked.hidden = true;
+  els.commentLogin.hidden = true;
+  els.commentCompose.hidden = true;
+  els.commentInput.value = '';
+  els.commentLimit.textContent = `0/${COMMENT_MAX}`;
+  els.commentSend.disabled = false;
+  els.commentSend.textContent = '发送';
+}
+
+function openDetail(task, options = {}) {
+  if (!task) return;
+  state.detailId = task.id;
+  state.detailSnapshot = {
+    title: task.title,
+    assignee: task.assignee,
+    priority: task.priority,
+    status: task.status,
+  };
+
+  els.detailEyebrow.textContent = `任务 #${task.id}`;
+  els.detailHeading.textContent = task.title || '任务详情';
+  els.dTitle.value = task.title || '';
+  els.dAssignee.value = task.assignee || '';
+  checkRadio('d-priority', task.priority || 'medium');
+  checkRadio('d-status', task.status || 'todo');
+  updateCounter(els.dTitle, els.dTitleCounter, TASK_TITLE_MAX);
+  setFieldError(els.dTitle, els.dTitleError, '');
+  setFieldError(els.dAssignee, els.dAssigneeError, '');
+  els.detailSave.disabled = false;
+  els.detailSave.textContent = '保存';
+
+  const creator = task.creator ? `由 ${task.creator} 创建` : '创建人未知';
+  const updated = task.updated_at ? `更新于 ${relativeTime(task.updated_at)}` : '';
+  els.detailMeta.textContent = [creator, updated].filter(Boolean).join(' · ');
+  els.detailMeta.title = task.updated_at ? fullTime(task.updated_at) : '';
+
+  els.assignMe.hidden = !(auth.mode === 'ready' && auth.user);
+  els.detailDelete.hidden = !canDelete(task);
+  resetDeleteConfirm();
+
+  resetComments();
+  if (typeof els.dialogDetail.showModal === 'function') els.dialogDetail.showModal();
+  else els.dialogDetail.setAttribute('open', '');
+  els.dialogDetail.classList.add('is-open');
+  syncHash(task.id);
+
+  loadComments(task);
+  ensureUsers();
+
+  if (options.focus !== false) setTimeout(() => els.dTitle.focus(), 0);
+}
+
+function closeDetail() {
+  if (!els.dialogDetail) return;
+  resetDeleteConfirm();
+  state.detailId = null;
+  state.detailSnapshot = null;
+  state.comments = { taskId: null, status: 'idle', items: [] };
+  els.dialogDetail.classList.remove('is-open');
+  if (typeof els.dialogDetail.close === 'function' && els.dialogDetail.open) els.dialogDetail.close();
+  else els.dialogDetail.removeAttribute('open');
+  clearHash();
+}
+
+function validateDetail() {
+  const title = els.dTitle.value.trim();
+  const assignee = els.dAssignee.value.trim();
+  let valid = true;
+
+  if (!title) {
+    setFieldError(els.dTitle, els.dTitleError, '标题不能为空');
+    valid = false;
+  } else if (title.length > TASK_TITLE_MAX) {
+    setFieldError(els.dTitle, els.dTitleError, `标题最多 ${TASK_TITLE_MAX} 字`);
+    valid = false;
+  } else {
+    setFieldError(els.dTitle, els.dTitleError, '');
+  }
+
+  if (!assignee) {
+    setFieldError(els.dAssignee, els.dAssigneeError, '负责人不能为空');
+    valid = false;
+  } else if (assignee.length > ASSIGNEE_MAX) {
+    setFieldError(els.dAssignee, els.dAssigneeError, `负责人最多 ${ASSIGNEE_MAX} 字`);
+    valid = false;
+  } else {
+    setFieldError(els.dAssignee, els.dAssigneeError, '');
+  }
+
+  if (!valid) {
+    (title ? els.dAssignee : els.dTitle).focus();
+    return null;
+  }
+  return { title, assignee };
+}
+
+async function submitDetail(event) {
+  event.preventDefault();
+  if (state.savingDetail) return;
+
+  const task = currentDetailTask();
+  if (!task) {
+    closeDetail();
+    return;
+  }
+
+  const values = validateDetail();
+  if (!values) return;
+
+  const priority = radioValue('d-priority') || task.priority;
+  const status = radioValue('d-status') || task.status;
+
+  const payload = {};
+  if (values.title !== task.title) payload.title = values.title;
+  if (values.assignee !== task.assignee) payload.assignee = values.assignee;
+  if (priority !== task.priority) payload.priority = priority;
+  if (status !== task.status) payload.status = status;
+
+  if (!Object.keys(payload).length) {
+    closeDetail();
+    toast('没有改动');
+    return;
+  }
+
+  state.savingDetail = true;
+  state.busy.add(task.id);
+  els.detailSave.disabled = true;
+  els.detailSave.textContent = '保存中…';
+
+  try {
+    const updated = await API.update(task.id, payload);
+    if (updated && typeof updated === 'object') Object.assign(task, payload, updated);
+    else Object.assign(task, payload);
+    if (!task.updated_at) task.updated_at = new Date().toISOString();
+    flashId = task.id;
+    focusTarget = `open:${task.id}`;
+    closeDetail();
+    render();
+    toast('任务已更新');
+  } catch (err) {
+    if (err.status === 401) {
+      closeDetail();
+      return;
+    }
+    if (err.status === 404) {
+      state.tasks = state.tasks.filter((item) => item.id !== task.id);
+      closeDetail();
+      render();
+      toast('这条任务已经被删除了', 'error');
+      return;
+    }
+    if (err.status === 403) {
+      toast(err.message || '没有权限修改这条任务', 'error');
+      return;
+    }
+    const fields = err.fields || {};
+    if (fields.title) setFieldError(els.dTitle, els.dTitleError, translateFieldMessage(fields.title));
+    if (fields.assignee) setFieldError(els.dAssignee, els.dAssigneeError, translateFieldMessage(fields.assignee));
+    if (fields.title || fields.assignee) toast('请检查填写内容', 'error');
+    else toast(err.message || '保存失败', 'error');
+  } finally {
+    state.savingDetail = false;
+    state.busy.delete(task.id);
+    els.detailSave.disabled = false;
+    els.detailSave.textContent = '保存';
+  }
+}
+
+async function assignToMe() {
+  const task = currentDetailTask();
+  const me = myLabel();
+  if (!task) return;
+  if (!me) {
+    toast('先登录才能指派给自己', 'error');
+    return;
+  }
+  if (String(task.assignee || '').trim() === me) {
+    toast('这条任务已经是你负责的');
+    return;
+  }
+
+  els.assignMe.disabled = true;
+  try {
+    const updated = await API.update(task.id, { assignee: me });
+    if (updated && typeof updated === 'object') Object.assign(task, { assignee: me }, updated);
+    else task.assignee = me;
+    els.dAssignee.value = task.assignee;
+    setFieldError(els.dAssignee, els.dAssigneeError, '');
+    els.detailHeading.textContent = task.title;
+    flashId = task.id;
+    render();
+    toast(`已指派给 ${me}`);
+  } catch (err) {
+    if (err.status === 401) {
+      closeDetail();
+      return;
+    }
+    if (err.status === 403) toast(err.message || '没有权限指派这条任务', 'error');
+    else if (err.status === 404) {
+      state.tasks = state.tasks.filter((item) => item.id !== task.id);
+      closeDetail();
+      render();
+      toast('这条任务已经被删除了', 'error');
+    } else {
+      toast(err.message || '指派失败', 'error');
+    }
+  } finally {
+    els.assignMe.disabled = false;
+  }
+}
+
+function armDelete() {
+  const task = currentDetailTask();
+  if (!task) return;
+  if (!state.deleteArmed) {
+    state.deleteArmed = true;
+    els.detailDelete.textContent = '确认删除？';
+    els.detailDelete.classList.add('is-armed');
+    clearTimeout(state.deleteTimer);
+    state.deleteTimer = setTimeout(resetDeleteConfirm, 4000);
+    return;
+  }
+  resetDeleteConfirm();
+  deleteTask(task);
+}
+
+async function deleteTask(task) {
+  els.detailDelete.disabled = true;
+  const label = els.detailDelete.textContent;
+  els.detailDelete.textContent = '删除中…';
+
+  try {
+    await API.remove(task.id);
+    state.tasks = state.tasks.filter((item) => String(item.id) !== String(task.id));
+    if (flashId !== null && String(flashId) === String(task.id)) flashId = null;
+    closeDetail();
+    render();
+    toast('任务已删除');
+  } catch (err) {
+    if (err.status === 401) {
+      closeDetail();
+      return;
+    }
+    if (err.status === 403) {
+      toast('只有创建人或管理员可以删除这条任务', 'error');
+    } else if (err.status === 404) {
+      state.tasks = state.tasks.filter((item) => String(item.id) !== String(task.id));
+      closeDetail();
+      render();
+      toast('这条任务已经被删除了');
+    } else {
+      toast(err.message || '删除失败', 'error');
+    }
+  } finally {
+    els.detailDelete.disabled = false;
+    els.detailDelete.textContent = label === '删除中…' ? '删除任务' : label;
+  }
+}
+
+async function copyTaskLink() {
+  const task = currentDetailTask();
+  if (!task) return;
+  const link = `${location.href.split('#')[0]}#task-${task.id}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('任务链接已复制');
+  } catch {
+    fallbackCopy(link);
+  }
+}
+
+function fallbackCopy(text) {
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  area.remove();
+  toast(ok ? '任务链接已复制' : `复制失败，链接：${text}`, ok ? 'ok' : 'error');
+}
+
+/* ---------------- 任务讨论 ---------------- */
+
+function extractComments(body) {
+  const items = extractItems(body);
+  if (items.length) return items;
+  if (body && body.comment && typeof body.comment === 'object') return [body.comment];
+  return [];
+}
+
+function commentAuthor(comment) {
+  const source = comment && comment.user && typeof comment.user === 'object' ? comment.user : comment;
+  const name = String(
+    source.display_name || source.displayName || source.username || comment?.display_name || comment?.username || '成员'
+  ).trim();
+  return {
+    name: name || '成员',
+    username: String(source.username || comment?.username || '').trim(),
+  };
+}
+
+function commentText(comment) {
+  return String(comment?.content ?? comment?.body ?? comment?.text ?? '').trim();
+}
+
+function renderComments() {
+  const items = state.comments.items;
+  els.commentList.replaceChildren();
+  els.commentCount.textContent = items.length ? `${items.length} 条` : '';
+
+  const fragment = document.createDocumentFragment();
+  for (const comment of items) {
+    const { name, username } = commentAuthor(comment);
+    const text = commentText(comment);
+
+    const item = document.createElement('li');
+    item.className = 'comment';
+
+    const avatar = document.createElement('span');
+    avatar.className = 'avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    avatar.textContent = name.charAt(0) || '?';
+    avatar.style.background = avatarColor(name);
+
+    const main = document.createElement('div');
+    main.className = 'comment-main';
+
+    const head = document.createElement('div');
+    head.className = 'comment-meta';
+    const author = document.createElement('span');
+    author.className = 'comment-author';
+    author.textContent = name;
+    if (username) author.title = `@${username}`;
+    const time = document.createElement('span');
+    time.className = 'comment-time';
+    time.textContent = relativeTime(comment.created_at);
+    if (comment.created_at) time.title = fullTime(comment.created_at);
+    head.append(author, time);
+
+    const body = document.createElement('p');
+    body.className = 'comment-text';
+    body.textContent = text;
+
+    main.append(head, body);
+    item.append(avatar, main);
+    fragment.appendChild(item);
+  }
+  els.commentList.replaceChildren(fragment);
+
+  els.commentEmpty.hidden = items.length > 0 || state.comments.status !== 'ready';
+  els.commentCompose.hidden = state.comments.status !== 'ready' || auth.mode !== 'ready';
+  els.commentLogin.hidden = !(state.comments.status === 'ready' && auth.mode !== 'ready');
+}
+
+async function loadComments(task) {
+  const taskId = task.id;
+  resetComments();
+  state.comments.taskId = taskId;
+
+  if (auth.mode !== 'ready') {
+    els.commentLogin.hidden = false;
+    return;
+  }
+
+  state.comments.status = 'loading';
+  els.commentCount.textContent = '…';
+
+  try {
+    const data = await API.comments(taskId);
+    if (state.detailId !== taskId) return;
+    state.comments.items = extractComments(data);
+    state.comments.status = 'ready';
+    renderComments();
+  } catch (err) {
+    if (state.detailId !== taskId) return;
+    if (err.status === 401 || err.status === 403) return; // 已回到登录页
+    if (err.status === 404 || err.status === 405 || err.status === 501) {
+      state.comments.status = 'unavailable';
+      els.commentCount.textContent = '';
+      els.commentBlocked.hidden = false;
+      return;
+    }
+    state.comments.status = 'error';
+    els.commentCount.textContent = '';
+    els.commentBlocked.hidden = false;
+    els.commentBlocked.textContent = `讨论加载失败：${err.message || '未知错误'}`;
+  }
+}
+
+async function sendComment() {
+  const task = currentDetailTask();
+  const content = els.commentInput.value.trim();
+  if (!task || !content || state.comments.status !== 'ready') return;
+  if (content.length > COMMENT_MAX) {
+    toast(`留言最多 ${COMMENT_MAX} 字`, 'error');
+    return;
+  }
+
+  els.commentSend.disabled = true;
+  els.commentSend.textContent = '发送中…';
+
+  try {
+    const data = await API.addComment(task.id, content);
+    const saved = data && typeof data === 'object' ? (data.comment || data.item || data) : null;
+    if (saved && (saved.id || saved.content || saved.body)) {
+      state.comments.items.push(saved);
+      renderComments();
+    } else {
+      await loadComments(task);
+    }
+    els.commentInput.value = '';
+    els.commentLimit.textContent = `0/${COMMENT_MAX}`;
+    els.commentInput.focus();
+  } catch (err) {
+    if (err.status === 401) return;
+    if (err.status === 404 || err.status === 405 || err.status === 501) {
+      state.comments.status = 'unavailable';
+      els.commentCompose.hidden = true;
+      els.commentBlocked.hidden = false;
+      toast('评论接口还没上线，等后端接入后再试', 'error');
+      return;
+    }
+    const fields = err.fields || {};
+    toast(fields.content ? `留言${translateFieldMessage(fields.content)}` : (err.message || '发送失败'), 'error');
+  } finally {
+    els.commentSend.disabled = false;
+    els.commentSend.textContent = '发送';
   }
 }
 
@@ -873,25 +1602,36 @@ function bindEvents() {
   els.close.addEventListener('click', closeDialog);
   els.cancel.addEventListener('click', closeDialog);
   els.form.addEventListener('submit', submitCreate);
-  els.refresh.addEventListener('click', load);
-  els.retry.addEventListener('click', load);
+  els.refresh.addEventListener('click', () => load());
+  els.retry.addEventListener('click', () => load());
 
   els.dialog.addEventListener('click', (event) => {
     if (event.target === els.dialog) closeDialog();
   });
 
   els.fTitle.addEventListener('input', () => {
-    updateCounter(els.fTitle, els.titleCounter, 200);
+    updateCounter(els.fTitle, els.titleCounter, TASK_TITLE_MAX);
     if (els.fTitle.getAttribute('aria-invalid') === 'true') setFieldError(els.fTitle, els.titleError, '');
   });
 
   els.fAssignee.addEventListener('input', () => {
-    updateCounter(els.fAssignee, els.assigneeCounter, 50);
+    updateCounter(els.fAssignee, els.assigneeCounter, ASSIGNEE_MAX);
     if (els.fAssignee.getAttribute('aria-invalid') === 'true') setFieldError(els.fAssignee, els.assigneeError, '');
   });
 
-  els.search.addEventListener('input', () => {
-    state.query = els.search.value;
+  els.search.addEventListener('input', applySearch);
+  els.search.addEventListener('focus', updateSearchChrome);
+  els.search.addEventListener('blur', () => setTimeout(updateSearchChrome, 0));
+  els.search.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && els.search.value) {
+      event.preventDefault();
+      clearSearch();
+    }
+  });
+  els.searchClear.addEventListener('click', clearSearch);
+
+  els.mineFilter.addEventListener('click', () => {
+    state.mine = !state.mine;
     render();
   });
 
@@ -912,8 +1652,70 @@ function bindEvents() {
       changeStatus(task, NEXT_STATUS[task.status]);
     } else if (event.target.closest('.revert')) {
       changeStatus(task, PREV_STATUS[task.status]);
+    } else if (event.target.closest('.edit-btn') || event.target.closest('.task-open') || !event.target.closest('button')) {
+      openDetail(task);
     }
   });
+
+  /* ---- 详情弹窗 ---- */
+
+  els.detailForm.addEventListener('submit', submitDetail);
+  els.detailClose.addEventListener('click', closeDetail);
+  els.detailCancel.addEventListener('click', closeDetail);
+  els.detailDelete.addEventListener('click', armDelete);
+  els.assignMe.addEventListener('click', assignToMe);
+  els.detailCopy.addEventListener('click', copyTaskLink);
+
+  els.dialogDetail.addEventListener('click', (event) => {
+    if (event.target === els.dialogDetail) closeDetail();
+  });
+
+  els.dialogDetail.addEventListener('close', () => {
+    state.detailId = null;
+    state.detailSnapshot = null;
+    state.comments = { taskId: null, status: 'idle', items: [] };
+    clearHash();
+  });
+
+  els.dTitle.addEventListener('input', () => {
+    updateCounter(els.dTitle, els.dTitleCounter, TASK_TITLE_MAX);
+    if (els.dTitle.getAttribute('aria-invalid') === 'true') setFieldError(els.dTitle, els.dTitleError, '');
+  });
+
+  els.dAssignee.addEventListener('input', () => {
+    if (els.dAssignee.getAttribute('aria-invalid') === 'true') setFieldError(els.dAssignee, els.dAssigneeError, '');
+  });
+
+  els.dialogDetail.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && event.target === els.commentInput) {
+      event.stopPropagation();
+      els.commentInput.blur();
+    }
+  });
+
+  /* ---- 讨论 ---- */
+
+  els.commentSend.addEventListener('click', sendComment);
+  els.commentInput.addEventListener('input', () => {
+    els.commentLimit.textContent = `${els.commentInput.value.length}/${COMMENT_MAX}`;
+  });
+  els.commentInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      sendComment();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (els.app.hidden || els.dialog.open || els.dialogDetail.open) return;
+    event.preventDefault();
+    els.search.focus();
+  });
+
+  window.addEventListener('hashchange', openDeepLink);
 }
 
 /* ---------------- 启动 ---------------- */
@@ -921,6 +1723,7 @@ function bindEvents() {
 function init() {
   els.today.textContent = todayLabel();
   setAuthMode('login');
+  updateSearchChrome();
   bindEvents();
   bootstrap();
 }

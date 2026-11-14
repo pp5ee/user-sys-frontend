@@ -87,10 +87,20 @@
         <button class="tab" type="button" data-status="doing" aria-pressed="false">进行中<span class="tab-count" data-count="doing">0</span></button>
         <button class="tab" type="button" data-status="done" aria-pressed="false">完成<span class="tab-count" data-count="done">0</span></button>
       </div>
-      <label class="search">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="M13.2 13.2L17 17" /></svg>
-        <input id="search" type="search" placeholder="搜标题或负责人" autocomplete="off" aria-label="搜标题或负责人" />
-      </label>
+      <div class="toolbar-right">
+        <button class="filter-chip" id="mine-filter" type="button" aria-pressed="false" title="只看负责人是我的任务">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="7" r="3" /><path d="M2.8 16c.5-3 2.7-4.7 5.2-4.7S12.7 13 13.2 16" /><path d="M14 6.5l1.6 1.6 3-3.2" /></svg>
+          我负责的
+        </button>
+        <div class="search" id="search-box">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="M13.2 13.2L17 17" /></svg>
+          <input id="search" type="search" placeholder="搜标题、负责人或创建人" autocomplete="off" aria-label="搜索任务：标题、负责人或创建人" />
+          <button class="search-clear" id="search-clear" type="button" aria-label="清空搜索" hidden>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6l8 8M14 6l-8 8" /></svg>
+          </button>
+          <kbd class="search-kbd" id="search-kbd" aria-hidden="true">/</kbd>
+        </div>
+      </div>
     </section>
 
     <section class="board" aria-label="任务列表">
@@ -152,7 +162,7 @@
           <label for="f-assignee">负责人</label>
           <span class="counter" id="assignee-counter">0/50</span>
         </div>
-        <input id="f-assignee" name="assignee" type="text" maxlength="50" placeholder="谁来负责" autocomplete="off" required />
+        <input id="f-assignee" name="assignee" type="text" maxlength="50" list="assignee-options" placeholder="谁来负责，可从成员里选" autocomplete="off" required />
         <p class="field-error" id="assignee-error" hidden></p>
       </div>
 
@@ -165,7 +175,7 @@
         </div>
       </div>
 
-      <p class="dialog-hint">新任务会以「待办」状态创建，之后可以在列表里改状态。</p>
+      <p class="dialog-hint">新任务会以「待办」状态创建，之后可以点开任务编辑、指派或改状态。</p>
 
       <footer class="dialog-actions">
         <button type="button" class="btn ghost" id="dialog-cancel">取消</button>
@@ -174,12 +184,97 @@
     </form>
   </dialog>
 
+  <dialog id="detail-dialog" class="dialog detail">
+    <form id="detail-form" novalidate>
+      <header class="dialog-head">
+        <div>
+          <p class="detail-eyebrow" id="detail-eyebrow">任务</p>
+          <h2 id="detail-heading">任务详情</h2>
+        </div>
+        <button type="button" class="icon-btn" id="detail-close" aria-label="关闭">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" /></svg>
+        </button>
+      </header>
+
+      <div class="field">
+        <div class="field-head">
+          <label for="d-title">标题</label>
+          <span class="counter" id="d-title-counter">0/200</span>
+        </div>
+        <input id="d-title" type="text" maxlength="200" autocomplete="off" required />
+        <p class="field-error" id="d-title-error" hidden></p>
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <label for="d-assignee">负责人</label>
+          <button type="button" class="text-btn" id="assign-me" hidden>指派给我</button>
+        </div>
+        <input id="d-assignee" type="text" maxlength="50" list="assignee-options" autocomplete="off" required />
+        <p class="field-error" id="d-assignee-error" hidden></p>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <div class="field-head"><span class="label-like" id="d-priority-label">优先级</span></div>
+          <div class="segmented" role="radiogroup" aria-labelledby="d-priority-label">
+            <label class="seg"><input type="radio" name="d-priority" value="low" /><span>低</span></label>
+            <label class="seg"><input type="radio" name="d-priority" value="medium" /><span>中</span></label>
+            <label class="seg"><input type="radio" name="d-priority" value="high" /><span>高</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-head"><span class="label-like" id="d-status-label">状态</span></div>
+          <div class="segmented" role="radiogroup" aria-labelledby="d-status-label">
+            <label class="seg"><input type="radio" name="d-status" value="todo" /><span>待办</span></label>
+            <label class="seg"><input type="radio" name="d-status" value="doing" /><span>进行中</span></label>
+            <label class="seg"><input type="radio" name="d-status" value="done" /><span>完成</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-meta">
+        <span id="detail-meta"></span>
+        <button type="button" class="text-btn" id="detail-copy">复制链接</button>
+      </div>
+
+      <footer class="dialog-actions">
+        <button type="button" class="btn ghost danger" id="detail-delete" hidden>删除任务</button>
+        <span class="actions-spacer"></span>
+        <button type="button" class="btn ghost" id="detail-cancel">取消</button>
+        <button type="submit" class="btn primary" id="detail-save">保存</button>
+      </footer>
+    </form>
+
+    <section class="comments" aria-label="任务讨论">
+      <div class="comments-head">
+        <h3>讨论</h3>
+        <span class="comment-count" id="comment-count"></span>
+      </div>
+      <ul class="comment-list" id="comment-list"></ul>
+      <p class="comment-note" id="comment-empty" hidden>还没有留言，说说进展或 @ 一下同事。</p>
+      <p class="comment-note" id="comment-blocked" hidden>
+        评论接口还没上线（<code>GET/POST /api/tasks/{id}/comments</code>），后端接入后这里就能讨论。
+      </p>
+      <p class="comment-note" id="comment-login" hidden>登录后可以在这里参与讨论。</p>
+      <div class="comment-compose" id="comment-compose" hidden>
+        <textarea id="comment-input" rows="2" maxlength="1000" placeholder="写点进展，或 @ 同事（Enter 发送，Shift+Enter 换行）"></textarea>
+        <div class="comment-actions">
+          <span class="comment-hint" id="comment-limit">0/1000</span>
+          <button type="button" class="btn primary btn-sm" id="comment-send">发送</button>
+        </div>
+      </div>
+    </section>
+  </dialog>
+
+  <datalist id="assignee-options"></datalist>
+
   <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
   <template id="row-template">
     <li class="row">
       <div class="cell cell-title">
-        <p class="task-title"></p>
+        <p class="task-title"><button class="task-open" type="button"></button></p>
         <p class="task-meta"></p>
       </div>
       <div class="cell cell-assignee">
@@ -193,6 +288,9 @@
         <button class="chip status" type="button"><span class="status-dot" aria-hidden="true"></span><span class="status-label"></span></button>
         <button class="revert" type="button" title="退回上一步" aria-label="退回上一步">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5.5L3.5 9.5l4 4" /><path d="M3.5 9.5h7a5 5 0 0 1 0 10" /></svg>
+        </button>
+        <button class="edit-btn" type="button" title="编辑任务" aria-label="编辑任务">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 3.5l4 4L7 17H3v-4z" /><path d="M10.5 5.5l4 4" /></svg>
         </button>
       </div>
     </li>
