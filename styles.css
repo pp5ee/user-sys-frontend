@@ -85,7 +85,128 @@ h1 {
   font-size: 13.5px;
 }
 
-.topbar-actions { display: flex; gap: 10px; flex-shrink: 0; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+/* ---------- 登录 / 注册 ---------- */
+
+.auth {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+}
+
+.auth[hidden] { display: none; }
+
+.auth-card {
+  width: min(400px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 28px 28px 22px;
+}
+
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+
+.auth-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.auth-mark svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+.auth-eyebrow {
+  margin: 0 0 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.auth-title { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+
+.auth-sub { margin: 0 0 18px; font-size: 13px; color: var(--ink-2); }
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface-3);
+  border-radius: 11px;
+  margin-bottom: 20px;
+}
+
+.auth-tab {
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink-2);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.auth-tab:hover { color: var(--ink); }
+
+.auth-tab[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(27, 27, 24, 0.07);
+}
+
+.auth-error {
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #fbeae6;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+.auth-submit { width: 100%; height: 42px; justify-content: center; margin-top: 2px; }
+
+.auth-foot { margin: 14px 0 0; text-align: center; font-size: 12px; color: var(--ink-3); }
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 11px 0 5px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+}
+
+.user-chip[hidden] { display: none; }
+.user-chip .avatar { width: 28px; height: 28px; font-size: 12px; }
+.user-name { font-size: 13px; color: var(--ink-2); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.btn-sm { height: 32px; padding: 0 11px; font-size: 12.5px; }
+.btn-sm[hidden] { display: none; }
+
+.notice {
+  margin: 0 0 16px;
+  padding: 10px 13px;
+  border: 1px solid #eddfc3;
+  background: #fbf6ea;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: #7a5a1c;
+}
+
+.notice[hidden] { display: none; }
+.notice code { font-size: 12px; background: rgba(122, 90, 28, 0.08); padding: 1px 4px; border-radius: 4px; }
 
 .btn {
   display: inline-flex;
@@ -484,7 +605,8 @@ h1 {
 
 .counter { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
-.field input[type="text"] {
+.field input[type="text"],
+.field input[type="password"] {
   width: 100%;
   height: 40px;
   padding: 0 12px;
@@ -495,9 +617,11 @@ h1 {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.field input[type="text"]::placeholder { color: var(--ink-3); }
+.field input[type="text"]::placeholder,
+.field input[type="password"]::placeholder { color: var(--ink-3); }
 
-.field input[type="text"]:focus {
+.field input[type="text"]:focus,
+.field input[type="password"]:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(31, 111, 92, 0.12);
@@ -598,9 +722,12 @@ h1 {
   .shell { width: calc(100% - 28px); padding-top: 28px; }
   .topbar { flex-direction: column; align-items: stretch; gap: 16px; }
   .topbar-actions { justify-content: flex-end; }
+  .user-chip { order: -1; margin-right: auto; }
   h1 { font-size: 23px; }
   .search { width: 100%; }
   .tabs { width: 100%; overflow-x: auto; }
   .tab { flex: 1; justify-content: center; padding: 7px 8px; }
   .sk-row { grid-template-columns: 1fr; gap: 10px; }
+  .auth { padding: 28px 14px; }
+  .auth-card { padding: 22px 20px 18px; }
 }

@@ -2,7 +2,9 @@
 
 /* ------------------------------------------------------------------ *
  * 团队任务台 — 前端
- * 接口：GET /api/tasks · POST /api/tasks · PATCH /api/tasks/{id}
+ * 任务：GET /api/tasks · POST /api/tasks · PATCH /api/tasks/{id}
+ * 用户：POST /api/auth/register · POST /api/auth/login
+ *       GET  /api/auth/me       · POST /api/auth/logout
  * ------------------------------------------------------------------ */
 
 const TEST_API = 'http://47.108.60.176';
@@ -11,8 +13,9 @@ const PRIORITY_LABEL = { low: '低', medium: '中', high: '高' };
 const NEXT_STATUS = { todo: 'doing', doing: 'done', done: null };
 const PREV_STATUS = { todo: null, doing: 'todo', done: 'doing' };
 const AVATAR_COLORS = ['#2f6f5e', '#3a5f9e', '#8a5a2b', '#7b4b8a', '#2b6a7a', '#8a4b4b'];
+const SESSION_KEY = 'ttb.session';
 
-/* ---------------- 接口地址 ---------------- */
+/* ---------------- 本地存储 ---------------- */
 
 function readStorage(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -21,6 +24,43 @@ function readStorage(key) {
 function writeStorage(key, value) {
   try { localStorage.setItem(key, value); } catch { /* 隐私模式下忽略 */ }
 }
+
+function removeStorage(key) {
+  try { localStorage.removeItem(key); } catch { /* 忽略 */ }
+}
+
+/* ---------------- 登录态 ---------------- */
+
+const auth = {
+  token: '',
+  user: null,
+  // checking：正在确认登录态；ready：已登录；anonymous：未登录；unavailable：后端还没有用户接口
+  mode: 'checking',
+};
+
+function readSession() {
+  const raw = readStorage(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    const saved = JSON.parse(raw);
+    return saved && typeof saved === 'object' ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession() {
+  if (!auth.token) return;
+  writeStorage(SESSION_KEY, JSON.stringify({ token: auth.token, user: auth.user }));
+}
+
+function clearSession() {
+  auth.token = '';
+  auth.user = null;
+  removeStorage(SESSION_KEY);
+}
+
+/* ---------------- 接口地址 ---------------- */
 
 function resolveApiBase() {
   const override = new URLSearchParams(location.search).get('api');
@@ -41,8 +81,13 @@ const API = {
   async request(path, options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
-    const init = { ...options, signal: controller.signal };
-    if (options.body) init.headers = { 'Content-Type': 'application/json' };
+
+    const headers = { ...(options.headers || {}) };
+    if (options.body) headers['Content-Type'] = 'application/json';
+    if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
+
+    const init = { ...options, headers, signal: controller.signal };
+    delete init.skipAuthRedirect;
 
     let res;
     try {
@@ -69,11 +114,17 @@ const API = {
       const err = new Error(message);
       err.status = res.status;
       err.fields = fields;
+      // 登录态失效：清掉本地会话，回到登录页
+      if ((res.status === 401 || res.status === 403) && auth.token && !options.skipAuthRedirect) {
+        expireSession('登录已过期，请重新登录');
+      }
       throw err;
     }
 
     return body;
   },
+
+  /* ---- 任务 ---- */
 
   list() {
     return this.request('/api/tasks');
@@ -89,7 +140,61 @@ const API = {
       body: JSON.stringify(payload),
     });
   },
+
+  /* ---- 用户 ---- */
+
+  me(options = {}) {
+    return this.request('/api/auth/me', { ...options, skipAuthRedirect: true });
+  },
+
+  login(payload) {
+    return this.request('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      skipAuthRedirect: true,
+    });
+  },
+
+  register(payload) {
+    return this.request('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      skipAuthRedirect: true,
+    });
+  },
+
+  logout() {
+    return this.request('/api/auth/logout', { method: 'POST', skipAuthRedirect: true });
+  },
 };
+
+/* ---------------- 登录取值（兼容常见字段名） ---------------- */
+
+function unwrap(body) {
+  if (!body || typeof body !== 'object') return null;
+  return body.data && typeof body.data === 'object' ? body.data : body;
+}
+
+function pickToken(body) {
+  const data = unwrap(body) || {};
+  const root = body && typeof body === 'object' ? body : {};
+  return data.token || data.access_token || data.accessToken || root.token || root.access_token || '';
+}
+
+function pickUser(body) {
+  const data = unwrap(body);
+  if (!data) return null;
+  const raw = data.user && typeof data.user === 'object' ? data.user : data;
+  const username = String(raw.username || raw.account || raw.name || '').trim();
+  const displayName = String(raw.display_name || raw.displayName || raw.nickname || username).trim();
+  if (!username && !displayName) return null;
+  return {
+    id: raw.id ?? null,
+    username: username || displayName,
+    displayName: displayName || username,
+    role: raw.role || 'member',
+  };
+}
 
 /* ---------------- 状态 ---------------- */
 
@@ -103,12 +208,32 @@ const state = {
 
 let focusTarget = null;
 let flashId = null;
+let authMode = 'login';
 
 /* ---------------- DOM ---------------- */
 
 const els = {
+  auth: document.getElementById('auth'),
+  authForm: document.getElementById('auth-form'),
+  authTabs: Array.from(document.querySelectorAll('.auth-tab')),
+  authTitle: document.getElementById('auth-title'),
+  authSub: document.getElementById('auth-sub'),
+  authFoot: document.getElementById('auth-foot'),
+  authError: document.getElementById('auth-error'),
+  authSubmit: document.getElementById('auth-submit'),
+  displayField: document.getElementById('display-field'),
+  fDisplay: document.getElementById('a-display'),
+  fUsername: document.getElementById('a-username'),
+  fPassword: document.getElementById('a-password'),
+
+  app: document.getElementById('app'),
   today: document.getElementById('today'),
   summary: document.getElementById('summary'),
+  userChip: document.getElementById('user-chip'),
+  userAvatar: document.getElementById('user-avatar'),
+  userName: document.getElementById('user-name'),
+  logout: document.getElementById('logout'),
+  notice: document.getElementById('auth-notice'),
   list: document.getElementById('list'),
   listHead: document.getElementById('list-head'),
   skeleton: document.getElementById('skeleton'),
@@ -182,6 +307,212 @@ function toast(message, kind = 'ok') {
     node.classList.add('out');
     setTimeout(() => node.remove(), 220);
   }, kind === 'error' ? 4200 : 2600);
+}
+
+/* ---------------- 登录页 / 任务台 切换 ---------------- */
+
+function setAuthMode(mode) {
+  authMode = mode === 'register' ? 'register' : 'login';
+  const isRegister = authMode === 'register';
+
+  for (const tab of els.authTabs) {
+    tab.setAttribute('aria-pressed', String(tab.dataset.mode === authMode));
+  }
+  els.authTitle.textContent = isRegister ? '注册' : '登录';
+  els.authSub.textContent = isRegister
+    ? '创建一个账号，之后用它登录看团队任务。'
+    : '登录后查看团队任务、新建任务和推进状态。';
+  els.authFoot.textContent = isRegister
+    ? '已有账号？点上面的「登录」。'
+    : '还没有账号？点上面的「注册」创建一个。';
+  els.displayField.hidden = !isRegister;
+  els.authSubmit.textContent = isRegister ? '注册' : '登录';
+  els.fPassword.setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
+  els.fPassword.placeholder = isRegister ? '设置密码' : '密码';
+  els.fPassword.value = '';
+  setAuthError('');
+}
+
+function showAuth(message = '') {
+  els.app.hidden = true;
+  els.auth.hidden = false;
+  els.logout.hidden = true;
+  els.userChip.hidden = true;
+  els.notice.hidden = true;
+  setAuthError(message);
+  setTimeout(() => els.fUsername.focus(), 0);
+}
+
+function renderUserChip() {
+  if (auth.mode === 'ready' && auth.user) {
+    const name = auth.user.displayName || auth.user.username || '已登录';
+    els.userChip.hidden = false;
+    els.userName.textContent = name;
+    els.userName.title = auth.user.username ? `@${auth.user.username}` : name;
+    els.userAvatar.textContent = name.trim().charAt(0) || '?';
+    els.userAvatar.style.background = avatarColor(name);
+    els.logout.hidden = false;
+    els.notice.hidden = true;
+  } else if (auth.mode === 'unavailable') {
+    els.userChip.hidden = false;
+    els.userName.textContent = '匿名访问';
+    els.userName.title = '后端用户接口还没上线';
+    els.userAvatar.textContent = '匿';
+    els.userAvatar.style.background = '#8b8b81';
+    els.logout.hidden = true;
+    els.notice.hidden = false;
+  } else {
+    els.userChip.hidden = true;
+    els.logout.hidden = true;
+    els.notice.hidden = true;
+  }
+}
+
+function showApp() {
+  els.auth.hidden = true;
+  els.app.hidden = false;
+  renderUserChip();
+  els.today.textContent = todayLabel();
+  load();
+}
+
+function enterSession(body) {
+  const token = pickToken(body);
+  const user = pickUser(body);
+  if (token) auth.token = token;
+  if (user) auth.user = user;
+  auth.mode = 'ready';
+  saveSession();
+}
+
+function expireSession(message) {
+  if (!auth.token) return;
+  clearSession();
+  auth.mode = 'anonymous';
+  setAuthMode('login');
+  showAuth(message);
+}
+
+function setAuthError(message) {
+  if (message) {
+    els.authError.textContent = message;
+    els.authError.hidden = false;
+  } else {
+    els.authError.textContent = '';
+    els.authError.hidden = true;
+  }
+}
+
+/* ---------------- 启动：确认登录态 ---------------- */
+
+async function bootstrap() {
+  const saved = readSession();
+  if (saved) {
+    auth.token = saved.token || '';
+    auth.user = pickUser(saved.user) || (saved.user || null);
+  }
+
+  try {
+    const body = await API.me();
+    const user = pickUser(body) || auth.user;
+    if (!user) throw Object.assign(new Error('登录态无效'), { status: 401 });
+    auth.user = user;
+    auth.mode = 'ready';
+    saveSession();
+    showApp();
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) {
+      const hadSession = Boolean(auth.token || saved);
+      clearSession();
+      auth.mode = 'anonymous';
+      setAuthMode('login');
+      showAuth(hadSession ? '登录已过期，请重新登录。' : '');
+      return;
+    }
+    if (err.status === 404 || err.status === 405 || err.status === 501) {
+      // 后端用户接口还没上线：先匿名浏览，接口发布后刷新即要求登录。
+      auth.mode = 'unavailable';
+      showApp();
+      return;
+    }
+    // 网络或服务异常：留在登录页并说明原因
+    auth.mode = 'anonymous';
+    setAuthMode('login');
+    showAuth(err.message || '连不上登录接口，请确认后端服务在线。');
+  }
+}
+
+/* ---------------- 登录 / 注册 / 退出 ---------------- */
+
+async function submitAuth(event) {
+  event.preventDefault();
+
+  const isRegister = authMode === 'register';
+  const username = els.fUsername.value.trim();
+  const password = els.fPassword.value;
+  const displayName = els.fDisplay.value.trim();
+
+  setAuthError('');
+  if (!username) return setAuthError('请输入账号。');
+  if (username.length > 50) return setAuthError('账号最多 50 个字符。');
+  if (!password) return setAuthError(isRegister ? '请设置密码。' : '请输入密码。');
+  if (password.length > 128) return setAuthError('密码最多 128 个字符。');
+  if (displayName.length > 50) return setAuthError('显示名最多 50 个字符。');
+
+  els.authSubmit.disabled = true;
+  els.authSubmit.textContent = isRegister ? '注册中…' : '登录中…';
+
+  try {
+    if (isRegister) {
+      const body = await API.register({ username, password, display_name: displayName || username });
+      const token = pickToken(body);
+      if (token) {
+        enterSession(body);
+        els.authForm.reset();
+        showApp();
+        toast('账号已创建，已自动登录');
+      } else {
+        setAuthMode('login');
+        els.fUsername.value = username;
+        els.fPassword.value = '';
+        setAuthError('注册成功，请用刚才的账号登录。');
+        toast('注册成功');
+      }
+      return;
+    }
+
+    const body = await API.login({ username, password });
+    const token = pickToken(body);
+    if (!token) throw new Error('登录接口没有返回 token，等后端确认字段后再试。');
+    enterSession(body);
+    els.authForm.reset();
+    showApp();
+    toast('已登录');
+  } catch (err) {
+    const message = err.message || (isRegister ? '注册失败' : '登录失败');
+    setAuthError(err.status === 401 ? '账号或密码不对。' : message);
+  } finally {
+    els.authSubmit.disabled = false;
+    els.authSubmit.textContent = isRegister ? '注册' : '登录';
+  }
+}
+
+async function logout() {
+  els.logout.disabled = true;
+  try {
+    await API.logout();
+  } catch {
+    /* 后端没提供退出接口时也照样清本地登录态 */
+  } finally {
+    els.logout.disabled = false;
+    const wasReady = auth.mode === 'ready';
+    clearSession();
+    auth.mode = 'anonymous';
+    state.tasks = [];
+    setAuthMode('login');
+    showAuth(wasReady ? '已退出登录。' : '');
+    toast('已退出登录');
+  }
 }
 
 /* ---------------- 渲染 ---------------- */
@@ -304,7 +635,8 @@ function render() {
 
   els.foot.classList.remove('is-off');
   const origin = API.base || location.origin;
-  els.footText.textContent = `接口 ${origin} · 更新于 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+  const who = auth.mode === 'ready' && auth.user ? ` · ${auth.user.displayName || auth.user.username}` : '';
+  els.footText.textContent = `接口 ${origin}${who} · 更新于 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
 
   if (focusTarget) {
     const target = document.querySelector(`[data-focus="${focusTarget}"]`);
@@ -329,6 +661,8 @@ function renderError(message) {
 /* ---------------- 数据 ---------------- */
 
 async function load() {
+  if (auth.mode !== 'ready' && auth.mode !== 'unavailable') return;
+
   state.loading = true;
   els.refresh.disabled = true;
   els.error.hidden = true;
@@ -343,6 +677,7 @@ async function load() {
     state.loading = false;
     render();
   } catch (err) {
+    if (err.status === 401 || err.status === 403) return; // 已回到登录页
     renderError(err.message || '加载失败');
   } finally {
     state.loading = false;
@@ -364,7 +699,7 @@ async function changeStatus(task, next) {
     if (updated && typeof updated === 'object') Object.assign(task, updated);
   } catch (err) {
     task.status = previous;
-    toast(err.message || '状态更新失败', 'error');
+    if (err.status !== 401 && err.status !== 403) toast(err.message || '状态更新失败', 'error');
   } finally {
     state.busy.delete(task.id);
     render();
@@ -388,6 +723,10 @@ function resetDialog() {
   els.form.reset();
   els.fTitle.value = '';
   els.fAssignee.value = '';
+  // 负责人默认填自己，改成别人也可以
+  if (auth.mode === 'ready' && auth.user) {
+    els.fAssignee.value = auth.user.displayName || auth.user.username || '';
+  }
   const medium = els.form.querySelector('input[name="priority"][value="medium"]');
   if (medium) medium.checked = true;
   setFieldError(els.fTitle, els.titleError, '');
@@ -461,6 +800,7 @@ async function submitCreate(event) {
     render();
     toast('任务已创建');
   } catch (err) {
+    if (err.status === 401 || err.status === 403) return; // 已回到登录页
     const fields = err.fields || {};
     if (fields.title) setFieldError(els.fTitle, els.titleError, fields.title);
     if (fields.assignee) setFieldError(els.fAssignee, els.assigneeError, fields.assignee);
@@ -475,6 +815,17 @@ async function submitCreate(event) {
 /* ---------------- 事件 ---------------- */
 
 function bindEvents() {
+  els.authForm.addEventListener('submit', submitAuth);
+
+  for (const tab of els.authTabs) {
+    tab.addEventListener('click', () => {
+      setAuthMode(tab.dataset.mode);
+      els.fUsername.focus();
+    });
+  }
+
+  els.logout.addEventListener('click', logout);
+
   els.newTask.addEventListener('click', openDialog);
   els.close.addEventListener('click', closeDialog);
   els.cancel.addEventListener('click', closeDialog);
@@ -526,8 +877,9 @@ function bindEvents() {
 
 function init() {
   els.today.textContent = todayLabel();
+  setAuthMode('login');
   bindEvents();
-  load();
+  bootstrap();
 }
 
 init();

@@ -9,7 +9,50 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="shell">
+  <section id="auth" class="auth" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="auth-mark" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9" /></svg>
+        </span>
+        <div>
+          <p class="auth-eyebrow">团队任务台</p>
+          <h1 class="auth-title" id="auth-title">登录</h1>
+        </div>
+      </div>
+      <p class="auth-sub" id="auth-sub">登录后查看团队任务、新建任务和推进状态。</p>
+
+      <div class="auth-tabs" role="group" aria-label="登录或注册">
+        <button class="auth-tab" type="button" data-mode="login" aria-pressed="true">登录</button>
+        <button class="auth-tab" type="button" data-mode="register" aria-pressed="false">注册</button>
+      </div>
+
+      <form id="auth-form" novalidate>
+        <div class="field" id="display-field" hidden>
+          <div class="field-head"><label for="a-display">显示名</label></div>
+          <input id="a-display" name="display_name" type="text" maxlength="50" placeholder="选填，默认用账号名" autocomplete="nickname" />
+        </div>
+
+        <div class="field">
+          <div class="field-head"><label for="a-username">账号</label></div>
+          <input id="a-username" name="username" type="text" maxlength="50" placeholder="用户名" autocomplete="username" required />
+        </div>
+
+        <div class="field">
+          <div class="field-head"><label for="a-password">密码</label></div>
+          <input id="a-password" name="password" type="password" maxlength="128" placeholder="密码" autocomplete="current-password" required />
+        </div>
+
+        <p class="auth-error" id="auth-error" hidden></p>
+
+        <button class="btn primary auth-submit" type="submit" id="auth-submit">登录</button>
+      </form>
+
+      <p class="auth-foot" id="auth-foot">还没有账号？点上面的「注册」创建一个。</p>
+    </div>
+  </section>
+
+  <main class="shell" id="app" hidden>
     <header class="topbar">
       <div class="titleblock">
         <p class="eyebrow" id="today">—</p>
@@ -17,6 +60,11 @@
         <p class="sub" id="summary">看今天有哪些事、谁在做、做到哪了。</p>
       </div>
       <div class="topbar-actions">
+        <div class="user-chip" id="user-chip" hidden>
+          <span class="avatar" id="user-avatar" aria-hidden="true"></span>
+          <span class="user-name" id="user-name"></span>
+        </div>
+        <button id="logout" class="btn ghost btn-sm" type="button" hidden>退出</button>
         <button id="refresh" class="btn ghost" type="button" title="重新拉取任务">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 6.5A6.5 6.5 0 1 0 16.5 12" /><path d="M15.5 2.5v4h-4" /></svg>
           刷新
@@ -27,6 +75,10 @@
         </button>
       </div>
     </header>
+
+    <p class="notice" id="auth-notice" hidden>
+      用户系统接口（<code>/api/auth/*</code>）还没上线，当前以匿名方式浏览任务；接口发布后会自动要求登录。
+    </p>
 
     <section class="toolbar">
       <div class="tabs" role="group" aria-label="按状态筛选">
