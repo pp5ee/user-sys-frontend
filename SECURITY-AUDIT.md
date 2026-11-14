@@ -7,9 +7,9 @@
 
 ## 结论摘要
 
-前端修复 6 项（1 高、2 中、3 低/提示），依赖审计清零，31 个单测和 14 项真实浏览器回归全部通过，构建产物已带 CSP。
+前端修复 6 项（1 高、2 中、3 低/提示），依赖审计清零，31 个单测和 14 项真实浏览器回归全部通过，构建产物已带 CSP，**整改后的前端已经上线**。
 
-**本次没能完成重新部署**：这台机器没有 `47.108.60.176` 的 SSH 密钥（`Permission denied (publickey)`，22 端口也不在本机放行范围），无法执行 `./deploy-frontend.sh`。整改后的 `dist/` 已构建好，等部署通道可用后同步即可。另外，当前线上跑的前端产物并不是本仓库构建出来的（见 D-01），这一点必须在下次部署时一并纠正。
+**部署过程**：这台机器没有 `47.108.60.176` 的 SSH 密钥（`Permission denied (publickey)`），本地无法执行 `./deploy-frontend.sh`；由有服务器权限的一侧按 commit `caeee31` 构建并同步后，线上 `index.html`、JS、CSS 三个文件的 sha256 与本地构建完全一致（见第五节）。部署前线上跑的是另一版前端产物（D-01），本次一并纠正。**仍未关闭**：全站只有 HTTP、`/docs` 公网可访问（D-02、D-05）。
 
 ## 一、已修复
 
@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | F-01 | 高 | `?api=` 参数可把接口地址指到任意服务器，并持久化到 localStorage，构成凭据/token 钓鱼通道 | 已修复 |
 | F-02 | 中 | 登录 token 长期存在 localStorage，同源脚本或共享电脑上可被长期复用 | 已修复（改 sessionStorage） |
-| F-03 | 中 | 页面没有任何 CSP / Referrer-Policy，缺少对注入脚本、外链资源的兜底 | 已修复（构建时注入），服务器头仍待补 |
+| F-03 | 中 | 页面没有任何 CSP / Referrer-Policy，缺少对注入脚本、外链资源的兜底 | 已修复（构建时注入 + 服务器响应头，见 D-03） |
 | F-04 | 低 | 开发依赖有 2 个 critical、1 个 moderate 漏洞（tinypool / @vitest/mocker） | 已修复 |
 | F-05 | 低 | 部署脚本未校验主机指纹、未限制 `--delete` 目标、不检查产物 | 已修复 |
 | F-06 | 提示 | 403（无权限）也被当成登录过期，会把已登录用户踢下线 | 已修复（仅 401 触发） |
@@ -73,15 +73,15 @@ object-src 'none'; media-src 'none'; frame-src 'none'; worker-src 'none'; base-u
 
 ## 二、部署侧待办（本仓库改不了，交后端 / 服务器）
 
-| 编号 | 级别 | 问题 | 证据 | 建议 |
+| 编号 | 级别 | 问题 | 证据 | 状态 |
 | --- | --- | --- | --- | --- |
-| D-01 | 高 | 线上前端产物与本仓库 main 不一致，无法回溯来源 | 线上引用 `/assets/index-CjZ3f-OG.js`（绝对路径，本仓库构建是 `./assets/`）；线上包内没有 `resolveApiBase` / `?api` 逻辑，深链接用 `?task=` 而非 `#task-`，登录态仍写 localStorage | 用本仓库 `dist/` 覆盖 `/var/www/team-tasks`，之后线上 hash 应与本仓库构建一致 |
-| D-02 | 高 | 全站只有 HTTP，443 连不上，密码和 Bearer token 明文传输 | `https://47.108.60.176` 返回 `SSL_ERROR_SYSCALL`；80 端口正常 | 上 TLS（证书 + 80→443 跳转），再加 HSTS |
-| D-03 | 中 | 静态页和接口没有任何安全响应头 | 80 端口响应只有 CORS 头，缺 CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy | 按 README「安全」一节的 nginx 片段补；若是 Java 直接服务静态资源，用 Filter / `WebMvcConfigurer` 统一加 |
-| D-04 | 中 | 接口 `Access-Control-Allow-Origin: *` | 80 端口响应头 | 收敛为实际站点来源；Bearer 场景下也不要通配 |
-| D-05 | 低 | Swagger `/docs` 公网可访问 | 前序联调记录 | 生产关闭或加鉴权 |
+| D-01 | 高 | 线上前端产物与本仓库不一致，无法回溯来源 | 部署前线上引用 `/assets/index-CjZ3f-OG.js`（绝对路径，本仓库构建是 `./assets/`），包内没有 `resolveApiBase` / `?api` 逻辑，深链接用 `?task=` 而非 `#task-`，登录态仍写 localStorage | **已关闭**：已用 commit `caeee31` 的构建覆盖，线上三个文件 sha256 与本地一致 |
+| D-02 | 高 | 全站只有 HTTP，443 连不上，密码和 Bearer token 明文传输 | `https://47.108.60.176` 仍返回 `SSL_ERROR_SYSCALL`；Chromium 也提示 COOP 头因非 HTTPS 被忽略 | **未关闭**：上 TLS（证书 + 80→443 跳转）后再加 HSTS |
+| D-03 | 中 | 静态页和接口没有任何安全响应头 | 部署前 80 端口响应只有 CORS 头 | **已关闭**：页面和 API 现在都返回 CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy / COOP / CORP；建议服务器 CSP 的 `script-src` 去掉 `'unsafe-inline'`（页面 meta 已收紧到 `'self'`，实际生效取交集） |
+| D-04 | 中 | 接口 `Access-Control-Allow-Origin: *` | 部署前通配 | **已关闭**：带外部 `Origin` 请求已不再返回 `Access-Control-Allow-Origin`，只保留 `Vary: Origin` |
+| D-05 | 低 | Swagger `/docs` 公网可访问 | `GET /docs` 仍返回 200 | **未关闭**：生产关闭或加鉴权 |
 
-D-01 意味着**当前线上的前端不在本审计结论覆盖范围内**：本次修复只有随 `dist/` 发布后才生效。D-02 ~ D-05 属于后端与服务器侧，避免越界未改动。
+D-02、D-05 属于后端与服务器侧，本仓库无法修改，留作后端收尾项。
 
 ## 三、已检查、未发现问题的项
 
@@ -112,9 +112,25 @@ $ python3 tmp/react-e2e/mock_and_test.py   # 真实 Chromium + mock 后端
 删除二次确认、刷新保持、移动端、登录过期），无 CSP 违规或控制台错误
 ```
 
-## 五、残余风险与后续
+## 五、部署后复核（2026-11-14）
 
-1. **部署未完成**（D-01/D-02 是最高优先）：本次修复要在服务器上同步 `dist/` 后才对线上生效；HTTPS 未上之前，登录密码仍可能被链路上的人看到。
+线上 <http://47.108.60.176> 已切到本次构建，逐文件比对：
+
+```
+index.html               86ccbb80c02f153f91222b3b51ff4b30c934c3615a9da01d5f70102582e11d26
+assets/index-Du2WkpVb.js 5201348255680fb26f409e13b6a62422438f643a2b5e2ac6b4989eb3dd5e1304
+assets/index-ByBJhMHT.css dfcd4b27a73412e2a28f14cee6c4f686c8aade8cdec43698dd56c71605e9f75c
+以上 sha256 与本地 dist/ 完全一致
+```
+
+- 响应头：页面和 `/api/*` 都带 CSP（含 `frame-ancestors 'none'`）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、COOP / CORP；
+- 未登录请求 `GET /api/auth/me` 返回 401 + `WWW-Authenticate: Bearer`，带外部 `Origin` 不再返回 `Access-Control-Allow-Origin`；
+- 真实 Chromium 打开线上页：正常渲染登录页，无 CSP 违规；`localStorage` 为空，`sessionStorage` 无残留会话；首屏只请求同源 `http://47.108.60.176/api/auth/me`；
+- 仍未关闭：`https://47.108.60.176` 连不上（D-02），`/docs` 返回 200（D-05）。
+
+## 六、残余风险与后续
+
+1. **HTTPS 未上**（D-02 最高优先）：登录密码和 Bearer token 仍走明文 HTTP，链路上的人可以截获；D-01 / D-03 / D-04 已随本次部署关闭。
 2. token 在 sessionStorage，XSS 仍可读取；建议后端评估 HttpOnly Cookie 方案。
 3. 登录接口的限流 / 锁定策略在前端不可见，建议后端补（防撞库）。
 4. 建议后续把 `npm audit` 和「产物含 CSP」检查接进 CI，避免回退。
