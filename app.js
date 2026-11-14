@@ -14,6 +14,14 @@ const NEXT_STATUS = { todo: 'doing', doing: 'done', done: null };
 const PREV_STATUS = { todo: null, doing: 'todo', done: 'doing' };
 const AVATAR_COLORS = ['#2f6f5e', '#3a5f9e', '#8a5a2b', '#7b4b8a', '#2b6a7a', '#8a4b4b'];
 const SESSION_KEY = 'ttb.session';
+// 与后端 /api/auth/register 的校验规则保持一致
+const USERNAME_MIN = 3;
+const USERNAME_MAX = 32;
+const USERNAME_RE = /^[A-Za-z0-9_.-]+$/;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 128;
+const DISPLAY_NAME_MAX = 50;
+const FIELD_LABEL = { username: '账号', password: '密码', display_name: '显示名' };
 
 /* ---------------- 本地存储 ---------------- */
 
@@ -328,7 +336,7 @@ function setAuthMode(mode) {
   els.displayField.hidden = !isRegister;
   els.authSubmit.textContent = isRegister ? '注册' : '登录';
   els.fPassword.setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
-  els.fPassword.placeholder = isRegister ? '设置密码' : '密码';
+  els.fPassword.placeholder = isRegister ? `设置密码（至少 ${PASSWORD_MIN} 位）` : '密码';
   els.fPassword.value = '';
   setAuthError('');
 }
@@ -454,10 +462,20 @@ async function submitAuth(event) {
 
   setAuthError('');
   if (!username) return setAuthError('请输入账号。');
-  if (username.length > 50) return setAuthError('账号最多 50 个字符。');
+  if (isRegister) {
+    if (username.length < USERNAME_MIN || username.length > USERNAME_MAX) {
+      return setAuthError(`账号需要 ${USERNAME_MIN}–${USERNAME_MAX} 个字符。`);
+    }
+    if (!USERNAME_RE.test(username)) {
+      return setAuthError('账号只能包含字母、数字、点、短横线和下划线。');
+    }
+  }
   if (!password) return setAuthError(isRegister ? '请设置密码。' : '请输入密码。');
-  if (password.length > 128) return setAuthError('密码最多 128 个字符。');
-  if (displayName.length > 50) return setAuthError('显示名最多 50 个字符。');
+  if (isRegister && password.length < PASSWORD_MIN) {
+    return setAuthError(`密码至少 ${PASSWORD_MIN} 位。`);
+  }
+  if (password.length > PASSWORD_MAX) return setAuthError(`密码最多 ${PASSWORD_MAX} 个字符。`);
+  if (displayName.length > DISPLAY_NAME_MAX) return setAuthError(`显示名最多 ${DISPLAY_NAME_MAX} 个字符。`);
 
   els.authSubmit.disabled = true;
   els.authSubmit.textContent = isRegister ? '注册中…' : '登录中…';
@@ -489,8 +507,7 @@ async function submitAuth(event) {
     showApp();
     toast('已登录');
   } catch (err) {
-    const message = err.message || (isRegister ? '注册失败' : '登录失败');
-    setAuthError(err.status === 401 ? '账号或密码不对。' : message);
+    setAuthError(authErrorMessage(err, isRegister));
   } finally {
     els.authSubmit.disabled = false;
     els.authSubmit.textContent = isRegister ? '注册' : '登录';
@@ -513,6 +530,32 @@ async function logout() {
     showAuth(wasReady ? '已退出登录。' : '');
     toast('已退出登录');
   }
+}
+
+/* ---------------- 登录错误文案 ---------------- */
+
+function translateFieldMessage(message) {
+  const text = String(message || '');
+  if (text === 'is required' || text === 'must not be empty') return '不能为空';
+  if (text === 'is already taken') return '已经被注册了';
+  if (text === 'must be a string') return '格式不对';
+  if (text.startsWith('may only contain')) return '只能包含字母、数字、点、短横线和下划线';
+  let match = text.match(/^must be at least (\d+) characters$/);
+  if (match) return `至少 ${match[1]} 个字符`;
+  match = text.match(/^must be at most (\d+) characters$/);
+  if (match) return `最多 ${match[1]} 个字符`;
+  return text;
+}
+
+function authErrorMessage(err, isRegister) {
+  if (err.status === 401) return isRegister ? '注册失败，请检查账号和密码。' : '账号或密码不对。';
+  if (err.status === 409) return '这个账号已经被注册了，换一个或直接登录。';
+  const fields = err.fields || {};
+  const keys = Object.keys(fields);
+  if (keys.length) {
+    return keys.map((key) => `${FIELD_LABEL[key] || key}${translateFieldMessage(fields[key])}`).join('；') + '。';
+  }
+  return err.message || (isRegister ? '注册失败' : '登录失败');
 }
 
 /* ---------------- 渲染 ---------------- */
