@@ -1,28 +1,70 @@
 import { API_BASE_KEY, COMMENT_MAX } from './constants.js';
-import { readStorage, writeStorage } from './session.js';
 
 const TEST_API = 'http://47.108.60.176';
 
 /**
- * 接口地址取值顺序：
- * 1. URL 参数 ?api=http://host:port（会记在 localStorage 里，之后一直用它）
- * 2. 构建时注入的 VITE_API_BASE
- * 3. localStorage 里记下的地址
- * 4. 本地（localhost / 127.0.0.1 / file:）打开时连测试服
- * 5. 其它情况走同域相对路径 /api
+ * 接口地址只允许两种来源，避免有人用 `?api=` 把页面指到自己的服务器上偷账号和 token：
+ * 1. 本地开发（localhost / 127.0.0.1 / file:）：可用 `?api=http://host:port` 指向测试服，
+ *    或构建时注入 VITE_API_BASE；
+ * 2. 线上：一律同源 `/api`，忽略 URL 参数、环境变量和历史 localStorage 记录。
+ *
+ * 之前版本会把 `?api=` 写进 localStorage，等于给了一条持续生效的钓鱼通道，已移除。
  */
-export function resolveApiBase() {
-  const override = new URLSearchParams(window.location.search).get('api');
-  if (override) writeStorage(API_BASE_KEY, override);
+export function isLocalLocation(loc) {
+  const host = String(loc?.hostname || '').toLowerCase();
+  return (
+    loc?.protocol === 'file:' ||
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]'
+  );
+}
 
-  const saved = readStorage(API_BASE_KEY);
-  if (saved) return saved.replace(/\/+$/, '');
+/** 只接受 http(s)、不带用户名密码的地址，其它（javascript:、data:、含凭据）一律丢弃。 */
+export function sanitizeApiBase(raw, loc = window.location) {
+  if (raw === null || raw === undefined || raw === '') return '';
+  let parsed;
+  try {
+    parsed = new URL(String(raw).trim(), loc?.origin || 'http://localhost');
+  } catch {
+    return '';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  if (parsed.username || parsed.password) return '';
+  const path = parsed.pathname.replace(/\/+$/, '');
+  return parsed.origin + path;
+}
 
-  const fromEnv = import.meta.env?.VITE_API_BASE;
-  if (fromEnv) return String(fromEnv).replace(/\/+$/, '');
+export function resolveApiBase(
+  loc = window.location,
+  legacyStorage = (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  })(),
+  envBase = import.meta.env?.VITE_API_BASE
+) {
+  // 旧版本留下的接口地址（含被 `?api=` 写进去的）一律清掉，不再信任
+  if (legacyStorage) {
+    try {
+      legacyStorage.removeItem(API_BASE_KEY);
+    } catch {
+      /* 隐私模式忽略 */
+    }
+  }
 
-  if (window.location.protocol === 'file:') return TEST_API;
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return TEST_API;
+  if (isLocalLocation(loc)) {
+    const override = sanitizeApiBase(new URLSearchParams(loc.search || '').get('api'), loc);
+    if (override) return override;
+    const fromEnv = sanitizeApiBase(envBase, loc);
+    if (fromEnv) return fromEnv;
+    return TEST_API;
+  }
+
+  // 线上只走同源，任何外部地址都不接受
   return '';
 }
 
@@ -81,7 +123,8 @@ export function createApi() {
       const err = new Error(message);
       err.status = res.status;
       err.fields = fields;
-      if ((res.status === 401 || res.status === 403) && token && !skipAuthRedirect && onUnauthorized) {
+      // 只有 401 才是登录态失效；403 是登录着但没权限，不能顺手把人踢下线
+      if (res.status === 401 && token && !skipAuthRedirect && onUnauthorized) {
         onUnauthorized('登录已过期，请重新登录');
       }
       throw err;

@@ -17,6 +17,18 @@ NODE_BIN="${NODE_BIN:-node}"
 
 cd "$(dirname "$0")"
 
+# --delete 会清空目标目录，禁止指向根目录或系统目录
+case "$TARGET" in
+  ""|"/"|"/var"|"/usr"|"/etc"|"/root"|"/home"|"/opt"|"/srv")
+    echo "拒绝部署到 TARGET=${TARGET}：这个目录不合适，请用 /var/www/team-tasks 这类专用目录" >&2
+    exit 1
+    ;;
+esac
+if [ "${TARGET#/}" = "$TARGET" ]; then
+  echo "拒绝部署：TARGET 必须是绝对路径（当前 ${TARGET}）" >&2
+  exit 1
+fi
+
 echo "==> 构建 dist"
 "$NODE_BIN" node_modules/vite/bin/vite.js build
 
@@ -25,13 +37,22 @@ if [ ! -f dist/index.html ]; then
   exit 1
 fi
 
-RSYNC_OPTS=(-az --delete --human-readable)
+# 安全审计要求产物里必须带 CSP；构建插件没跑起来就别发布
+if ! grep -q "Content-Security-Policy" dist/index.html; then
+  echo "构建产物缺少 Content-Security-Policy，停止发布" >&2
+  exit 1
+fi
+
+RSYNC_OPTS=(-az --delete --human-readable --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r)
 if [ "${DRY_RUN:-0}" = "1" ]; then
   RSYNC_OPTS+=(--dry-run --itemize-changes)
   echo "==> DRY_RUN：只预览，不写入"
 fi
 
+# accept-new：首次连接记下主机指纹，之后指纹变了就拒绝，避免中间人悄悄换服务器
+SSH_CMD="ssh -p ${PORT} -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o BatchMode=yes"
+
 echo "==> 同步到 ${USER_NAME}@${SERVER}:${TARGET}"
-rsync "${RSYNC_OPTS[@]}" -e "ssh -p ${PORT}" dist/ "${USER_NAME}@${SERVER}:${TARGET}/"
+rsync "${RSYNC_OPTS[@]}" -e "$SSH_CMD" dist/ "${USER_NAME}@${SERVER}:${TARGET}/"
 
 echo "==> 完成：http://${SERVER}/"

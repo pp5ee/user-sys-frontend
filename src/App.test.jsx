@@ -32,6 +32,7 @@ describe('团队任务台（React）', () => {
   beforeEach(() => {
     backend = createBackend();
     localStorage.clear();
+    sessionStorage.clear();
     api.setToken('');
     api.setUnauthorizedHandler(null);
     window.history.replaceState(null, '', '/');
@@ -58,7 +59,7 @@ describe('团队任务台（React）', () => {
     expect(screen.getByRole('button', { name: /^待办/ })).toHaveTextContent('1');
     expect(screen.getByRole('button', { name: /^进行中/ })).toHaveTextContent('1');
     expect(screen.getByRole('button', { name: /^完成/ })).toHaveTextContent('1');
-    expect(localStorage.getItem('ttb.session')).toContain('tok-bbsee');
+    expect(sessionStorage.getItem('ttb.session')).toContain('tok-bbsee');
   });
 
   it('密码错误时给出提示', async () => {
@@ -103,7 +104,7 @@ describe('团队任务台（React）', () => {
   });
 
   it('刷新页面时用已保存的登录态', async () => {
-    localStorage.setItem(
+    sessionStorage.setItem(
       'ttb.session',
       JSON.stringify({ token: 'tok-bbsee', user: { id: 1, username: 'bbsee', displayName: 'BBSee', role: 'admin' } })
     );
@@ -112,10 +113,10 @@ describe('团队任务台（React）', () => {
   });
 
   it('token 失效时回到登录页并提示过期', async () => {
-    localStorage.setItem('ttb.session', JSON.stringify({ token: 'tok-expired', user: { username: 'bbsee' } }));
+    sessionStorage.setItem('ttb.session', JSON.stringify({ token: 'tok-expired', user: { username: 'bbsee' } }));
     setup(backend);
     expect(await screen.findByRole('alert')).toHaveTextContent('登录已过期，请重新登录。');
-    expect(localStorage.getItem('ttb.session')).toBeNull();
+    expect(sessionStorage.getItem('ttb.session')).toBeNull();
   });
 
   it('后端用户接口未上线时允许匿名浏览', async () => {
@@ -271,7 +272,7 @@ describe('团队任务台（React）', () => {
   });
 
   it('退出登录后清掉本地登录态', async () => {
-    localStorage.setItem(
+    sessionStorage.setItem(
       'ttb.session',
       JSON.stringify({ token: 'tok-bbsee', user: { id: 1, username: 'bbsee', displayName: 'BBSee', role: 'admin' } })
     );
@@ -280,7 +281,7 @@ describe('团队任务台（React）', () => {
     await user.click(screen.getByRole('button', { name: '退出' }));
 
     expect(await screen.findByRole('heading', { name: '登录' })).toBeInTheDocument();
-    expect(localStorage.getItem('ttb.session')).toBeNull();
+    expect(sessionStorage.getItem('ttb.session')).toBeNull();
   });
 
   it('任务接口 401 时自动回登录页', async () => {

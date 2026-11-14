@@ -1,10 +1,24 @@
-import { AVATAR_COLORS, SESSION_KEY, STATUS_LABEL } from './constants.js';
+import { API_BASE_KEY, AVATAR_COLORS, SESSION_KEY, STATUS_LABEL } from './constants.js';
 
-/* ---------------- 本地存储 ---------------- */
+/* ---------------- 会话存储 ----------------
+ * 登录 token 放在 sessionStorage：只在当前标签页有效，刷新还在、关标签页就没了，
+ * 也不和执行同源脚本的其它页面共享，比长期留在 localStorage 里安全。
+ * 后端如果以后改成 HttpOnly Cookie，这里可以直接删掉。
+ */
+
+const TOKEN_MAX = 4096;
+
+function storage() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 export function readStorage(key) {
   try {
-    return localStorage.getItem(key);
+    return storage()?.getItem(key) ?? null;
   } catch {
     return null;
   }
@@ -12,7 +26,7 @@ export function readStorage(key) {
 
 export function writeStorage(key, value) {
   try {
-    localStorage.setItem(key, value);
+    storage()?.setItem(key, value);
   } catch {
     /* 隐私模式下忽略 */
   }
@@ -20,32 +34,54 @@ export function writeStorage(key, value) {
 
 export function removeStorage(key) {
   try {
-    localStorage.removeItem(key);
+    storage()?.removeItem(key);
   } catch {
     /* 忽略 */
+  }
+}
+
+/* 清掉旧版本留在 localStorage 里的 token 和接口地址，避免它们长期留在磁盘上 */
+export function purgeLegacyStorage() {
+  try {
+    window.localStorage.removeItem(SESSION_KEY);
+    window.localStorage.removeItem(API_BASE_KEY);
+  } catch {
+    /* 隐私模式 / 禁用存储时忽略 */
   }
 }
 
 /* ---------------- 登录态 ---------------- */
 
 export function readSession() {
+  purgeLegacyStorage();
   const raw = readStorage(SESSION_KEY);
   if (!raw) return null;
   try {
     const saved = JSON.parse(raw);
-    return saved && typeof saved === 'object' ? saved : null;
+    if (!saved || typeof saved !== 'object') return null;
+    const token = typeof saved.token === 'string' ? saved.token.trim() : '';
+    if (!token || token.length > TOKEN_MAX) {
+      removeStorage(SESSION_KEY);
+      return null;
+    }
+    return {
+      token,
+      user: saved.user && typeof saved.user === 'object' ? saved.user : null,
+    };
   } catch {
+    removeStorage(SESSION_KEY);
     return null;
   }
 }
 
 export function saveSession(token, user) {
-  if (!token) return;
-  writeStorage(SESSION_KEY, JSON.stringify({ token, user }));
+  if (!token || typeof token !== 'string' || token.length > TOKEN_MAX) return;
+  writeStorage(SESSION_KEY, JSON.stringify({ token, user: user || null }));
 }
 
 export function clearSession() {
   removeStorage(SESSION_KEY);
+  purgeLegacyStorage();
 }
 
 /* ---------------- 取值兼容 ---------------- */
