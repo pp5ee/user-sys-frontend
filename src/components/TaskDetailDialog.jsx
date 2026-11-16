@@ -270,6 +270,7 @@ export default function TaskDetailDialog({
 
   const creator = task.creator ? `由 ${task.creator} 创建` : '创建人未知';
   const updated = task.updated_at ? `更新于 ${relativeTime(task.updated_at)}` : '';
+  const note = typeof task.note === 'string' ? task.note.trim() : '';
   const commentLabel = comments.items.length ? `${comments.items.length} 条` : comments.status === 'loading' ? '…' : '';
 
   return (
@@ -402,6 +403,13 @@ export default function TaskDetailDialog({
             </div>
           </div>
         </div>
+
+        {note ? (
+          <div className="detail-note">
+            <span className="detail-note-label">备注</span>
+            <p className="detail-note-text">{note}</p>
+          </div>
+        ) : null}
 
         <div className="detail-meta">
           <span title={task.updated_at ? fullTime(task.updated_at) : ''}>

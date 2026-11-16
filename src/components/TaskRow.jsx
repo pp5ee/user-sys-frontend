@@ -4,6 +4,7 @@ import { avatarColor, fullTime, relativeTime } from '../session.js';
 export default function TaskRow({ task, busy, isNew, onOpen, onChangeStatus }) {
   const next = NEXT_STATUS[task.status];
   const prev = PREV_STATUS[task.status];
+  const note = typeof task.note === 'string' ? task.note.trim() : '';
   const meta = [`#${task.id}`];
   if (task.creator) meta.push(`创建人 ${task.creator}`);
   if (task.updated_at) meta.push(`更新于 ${relativeTime(task.updated_at)}`);
@@ -27,6 +28,7 @@ export default function TaskRow({ task, busy, isNew, onOpen, onChangeStatus }) {
             {task.title}
           </button>
         </p>
+        {note ? <p className="task-note">{note}</p> : null}
         <p className="task-meta" title={task.updated_at ? fullTime(task.updated_at) : ''}>
           {meta.join(' · ')}
         </p>

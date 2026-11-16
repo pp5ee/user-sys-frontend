@@ -19,6 +19,7 @@ export const PASSWORD_MAX = 128;
 export const DISPLAY_NAME_MAX = 50;
 export const TASK_TITLE_MAX = 200;
 export const ASSIGNEE_MAX = 50;
+export const NOTE_MAX = 200;
 export const COMMENT_MAX = 1000;
 export const SEARCH_DEBOUNCE = 260;
 
@@ -28,5 +29,6 @@ export const FIELD_LABEL = {
   display_name: '显示名',
   title: '标题',
   assignee: '负责人',
+  note: '备注',
   content: '留言',
 };

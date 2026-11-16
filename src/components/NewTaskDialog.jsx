@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { ASSIGNEE_MAX, PRIORITY_LABEL, TASK_TITLE_MAX } from '../constants.js';
+import { ASSIGNEE_MAX, NOTE_MAX, PRIORITY_LABEL, TASK_TITLE_MAX } from '../constants.js';
 import { translateFieldMessage } from '../session.js';
 
-const emptyErrors = { title: '', assignee: '' };
+const emptyErrors = { title: '', assignee: '', note: '' };
 
 export default function NewTaskDialog({ assigneeOptions, defaultAssignee, onClose, onCreated, onToast }) {
   const dialogRef = useRef(null);
   const titleRef = useRef(null);
   const assigneeRef = useRef(null);
+  const noteRef = useRef(null);
   const closedRef = useRef(false);
   const [title, setTitle] = useState('');
   const [assignee, setAssignee] = useState(defaultAssignee || '');
   const [priority, setPriority] = useState('medium');
+  const [note, setNote] = useState('');
   const [errors, setErrors] = useState(emptyErrors);
   const [busy, setBusy] = useState(false);
 
@@ -45,7 +47,8 @@ export default function NewTaskDialog({ assigneeOptions, defaultAssignee, onClos
   function validate() {
     const value = title.trim();
     const owner = assignee.trim();
-    const next = { title: '', assignee: '' };
+    const memo = note.trim();
+    const next = { title: '', assignee: '', note: '' };
     let valid = true;
 
     if (!value) {
@@ -64,12 +67,17 @@ export default function NewTaskDialog({ assigneeOptions, defaultAssignee, onClos
       valid = false;
     }
 
+    if (memo.length > NOTE_MAX) {
+      next.note = `备注最多 ${NOTE_MAX} 字`;
+      valid = false;
+    }
+
     setErrors(next);
     if (!valid) {
-      (!value ? titleRef : assigneeRef).current?.focus();
+      (!value ? titleRef : !owner ? assigneeRef : noteRef).current?.focus();
       return null;
     }
-    return { title: value, assignee: owner };
+    return { title: value, assignee: owner, note: memo };
   }
 
   async function handleSubmit(event) {
@@ -78,19 +86,24 @@ export default function NewTaskDialog({ assigneeOptions, defaultAssignee, onClos
     const values = validate();
     if (!values) return;
 
+    // 没填备注就不提交 note，避免后端存空字符串
+    const payload = { title: values.title, assignee: values.assignee, priority };
+    if (values.note) payload.note = values.note;
+
     setBusy(true);
     try {
-      const task = await api.create({ ...values, priority });
+      const task = await api.create(payload);
       onCreated(task);
       onToast?.('任务已创建');
       close();
     } catch (err) {
       if (err.status === 401 || err.status === 403) return;
       const fields = err.fields || {};
-      if (fields.title || fields.assignee) {
+      if (fields.title || fields.assignee || fields.note) {
         setErrors({
           title: fields.title ? translateFieldMessage(fields.title) : '',
           assignee: fields.assignee ? translateFieldMessage(fields.assignee) : '',
+          note: fields.note ? translateFieldMessage(fields.note) : '',
         });
         onToast?.('请检查填写内容', 'error');
       } else {
@@ -202,6 +215,36 @@ export default function NewTaskDialog({ assigneeOptions, defaultAssignee, onClos
               </label>
             ))}
           </div>
+        </div>
+
+        <div className="field">
+          <div className="field-head">
+            <label htmlFor="f-note">
+              备注 <span className="field-optional">选填</span>
+            </label>
+            <span className="counter" id="note-counter">
+              {note.length}/{NOTE_MAX}
+            </span>
+          </div>
+          <textarea
+            id="f-note"
+            name="note"
+            rows={3}
+            maxLength={NOTE_MAX}
+            placeholder="补充说明，最多 200 字"
+            ref={noteRef}
+            value={note}
+            aria-invalid={errors.note ? 'true' : 'false'}
+            onChange={(event) => {
+              setNote(event.target.value);
+              if (errors.note) setErrors((prev) => ({ ...prev, note: '' }));
+            }}
+          />
+          {errors.note ? (
+            <p className="field-error" id="note-error">
+              {errors.note}
+            </p>
+          ) : null}
         </div>
 
         <p className="dialog-hint">新任务会以「待办」状态创建，之后可以点开任务编辑、指派或改状态。</p>

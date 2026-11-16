@@ -24,6 +24,7 @@ export function createBackend(overrides = {}) {
       assignee: 'BBSee',
       priority: 'high',
       status: 'doing',
+      note: '联调时注意旧会话的兼容。',
       created_by: 1,
       creator: 'bbsee',
       created_at: '2026-11-14T10:00:00Z',
@@ -138,6 +139,8 @@ export function createBackend(overrides = {}) {
         updated_at: new Date().toISOString(),
         comment_count: 0,
       };
+      // 和真实后端一致：没传 note 就不存这个字段
+      if (body.note) task.note = body.note;
       tasks.unshift(task);
       return json(201, task);
     }

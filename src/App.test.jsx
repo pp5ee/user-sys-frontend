@@ -110,6 +110,7 @@ describe('团队任务台（React）', () => {
     );
     setup(backend);
     expect(await screen.findByText('登录页联调')).toBeInTheDocument();
+    expect(screen.getByText('联调时注意旧会话的兼容。')).toBeInTheDocument();
   });
 
   it('token 失效时回到登录页并提示过期', async () => {
@@ -190,6 +191,45 @@ describe('团队任务台（React）', () => {
 
     expect(await within(dialog).findByText('标题不能为空')).toBeInTheDocument();
     expect(backend.tasks).toHaveLength(3);
+  });
+
+  it('新建任务时可以带备注提交', async () => {
+    const { user } = setup(backend);
+    await login(user);
+    await user.click(screen.getByRole('button', { name: '新建任务' }));
+    const dialog = await screen.findByRole('dialog');
+    const noteInput = within(dialog).getByLabelText(/备注/);
+    expect(noteInput).toHaveAttribute('maxLength', '200');
+
+    await user.type(within(dialog).getByLabelText('标题'), '带备注的任务');
+    await user.type(noteInput, '先确认旧接口兼容');
+    await user.click(within(dialog).getByRole('button', { name: '新建任务' }));
+
+    await waitFor(() => expect(backend.tasks[0].note).toBe('先确认旧接口兼容'));
+    expect(backend.tasks[0].title).toBe('带备注的任务');
+  });
+
+  it('备注没填时不提交 note 字段', async () => {
+    const { user } = setup(backend);
+    await login(user);
+    await user.click(screen.getByRole('button', { name: '新建任务' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('标题'), '没有备注的任务');
+    await user.click(within(dialog).getByRole('button', { name: '新建任务' }));
+
+    await waitFor(() => expect(backend.tasks[0].title).toBe('没有备注的任务'));
+    const posted = backend.state.calls.find((call) => call.method === 'POST' && call.path === '/api/tasks');
+    expect(posted.body).not.toHaveProperty('note');
+    expect(backend.tasks[0]).not.toHaveProperty('note');
+  });
+
+  it('任务详情显示备注', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    await user.click(screen.getByRole('button', { name: '打开任务「登录页联调」' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('联调时注意旧会话的兼容。')).toBeInTheDocument();
   });
 
   it('详情里编辑标题并保存', async () => {
