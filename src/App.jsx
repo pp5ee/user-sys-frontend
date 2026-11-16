@@ -8,6 +8,7 @@ import Toasts from './components/Toasts.jsx';
 import {
   SEARCH_DEBOUNCE,
 } from './constants.js';
+import { matchesQuery } from './search.js';
 import {
   clearSession,
   extractItems,
@@ -244,14 +245,7 @@ export default function App() {
         (assignee === myLabel || (user?.username && assignee === user.username));
       if (!isMine) return false;
     }
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      String(task.title || '').toLowerCase().includes(q) ||
-      String(task.note || '').toLowerCase().includes(q) ||
-      String(task.assignee || '').toLowerCase().includes(q) ||
-      String(task.creator || '').toLowerCase().includes(q)
-    );
+    return matchesQuery(task, query);
   });
 
   const assigneeOptions = (() => {

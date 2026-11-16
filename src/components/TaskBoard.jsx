@@ -188,9 +188,10 @@ export default function TaskBoard({
               id="search"
               ref={searchRef}
               type="search"
-              placeholder="搜标题、负责人或创建人"
+              placeholder="搜标题、备注或负责人"
+              title="搜索任务：标题、备注、负责人或创建人"
               autoComplete="off"
-              aria-label="搜索任务：标题、负责人或创建人"
+              aria-label="搜索任务：标题、备注、负责人或创建人"
               value={query}
               onFocus={() => setSearchFocused(true)}
               onBlur={() => setTimeout(() => setSearchFocused(false), 0)}

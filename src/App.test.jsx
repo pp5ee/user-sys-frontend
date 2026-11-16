@@ -158,6 +158,42 @@ describe('团队任务台（React）', () => {
     await waitFor(() => expect(backend.state.lastQuery).toBe('旧会话'), { timeout: 2000 });
   });
 
+  it('搜索框提示写明可以搜标题、备注和负责人', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    const search = screen.getByLabelText(/搜索任务/);
+    expect(search).toHaveAttribute('placeholder', '搜标题、备注或负责人');
+    expect(search).toHaveAttribute('title', '搜索任务：标题、备注、负责人或创建人');
+    expect(search).toHaveAttribute('aria-label', '搜索任务：标题、备注、负责人或创建人');
+  });
+
+  it('搜索能匹配负责人，大小写和首尾空格不影响', async () => {
+    backend.tasks[1].assignee = '  ZHOU  ';
+    backend.tasks[1].creator = 'bbsee';
+    const { user } = setup(backend);
+    await login(user);
+
+    const search = screen.getByLabelText(/搜索任务/);
+    await user.type(search, 'zhou');
+
+    expect(screen.getByText('80 端口静态挂载')).toBeInTheDocument();
+    expect(screen.queryByText('登录页联调')).not.toBeInTheDocument();
+    expect(screen.queryByText('移动端排版')).not.toBeInTheDocument();
+    await waitFor(() => expect(backend.state.lastQuery).toBe('zhou'), { timeout: 2000 });
+  });
+
+  it('搜索负责人能部分命中', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    const search = screen.getByLabelText(/搜索任务/);
+    await user.type(search, '老');
+
+    expect(screen.getByText('80 端口静态挂载')).toBeInTheDocument();
+    expect(screen.queryByText('登录页联调')).not.toBeInTheDocument();
+  });
+
   it('「我负责的」只显示当前用户的任务', async () => {
     const { user } = setup(backend);
     await login(user);

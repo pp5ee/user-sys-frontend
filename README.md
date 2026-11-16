@@ -106,9 +106,9 @@ add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" alway
 | DELETE | `/api/tasks/{id}` | 删除，返回 204；只允许创建人或管理员 |
 | GET | `/api/users` | 团队成员，返回 `{ items, total }`；用于负责人候选 |
 
-字段：`title`（必填，≤200）、`assignee`（必填，≤50）、`priority`（`low` / `medium` / `high`，默认 `medium`）、`status`（`todo` / `doing` / `done`，默认 `todo`），另有服务端生成的 `id`、`created_by`、`creator`、`created_at`、`updated_at`。
+字段：`title`（必填，≤200）、`assignee`（必填，≤50）、`priority`（`low` / `medium` / `high`，默认 `medium`）、`status`（`todo` / `doing` / `done`，默认 `todo`）、`note`（选填，≤200，不填就不存），另有服务端生成的 `id`、`created_by`、`creator`、`created_at`、`updated_at`。
 
-搜索：输入框防抖 260 ms 后带 `q` 请求一次列表，同时始终在前端按标题 / 负责人 / 创建人过滤。后端支持 `q` 时以服务端结果为准；不支持时（参数被忽略，或返回 4xx）本地过滤照样工作，不会把列表搜空。`/` 聚焦搜索框，Esc 清空。
+搜索：输入框提示写的是「搜标题、备注或负责人」，实际匹配标题 / 备注 / 负责人 / 创建人，关键词先去掉首尾空格、忽略大小写。输入框防抖 260 ms 后带 `q` 请求一次列表，同时始终在前端按这几个字段过滤。后端支持 `q` 时以服务端结果为准；不支持时（参数被忽略，或返回 4xx）本地过滤照样工作，不会把列表搜空。`/` 聚焦搜索框，Esc 清空。
 
 「我负责的」按当前登录人的显示名（或账号名）匹配 `assignee`，纯前端筛选。
 
