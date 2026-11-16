@@ -119,7 +119,9 @@ export function createBackend(overrides = {}) {
       state.lastQuery = q;
       const list = q
         ? tasks.filter((task) =>
-            [task.title, task.assignee, task.creator].some((value) => String(value || '').toLowerCase().includes(q.toLowerCase()))
+            [task.title, task.note, task.assignee, task.creator].some((value) =>
+              String(value || '').toLowerCase().includes(q.toLowerCase())
+            )
           )
         : tasks;
       return json(200, { items: list.map((task) => ({ ...task })), total: list.length });

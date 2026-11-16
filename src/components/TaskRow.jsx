@@ -28,7 +28,11 @@ export default function TaskRow({ task, busy, isNew, onOpen, onChangeStatus }) {
             {task.title}
           </button>
         </p>
-        {note ? <p className="task-note">{note}</p> : null}
+        {note ? (
+          <p className="task-note" title={note}>
+            {note}
+          </p>
+        ) : null}
         <p className="task-meta" title={task.updated_at ? fullTime(task.updated_at) : ''}>
           {meta.join(' · ')}
         </p>

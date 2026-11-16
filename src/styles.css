@@ -467,7 +467,9 @@ h1 {
   font-size: 12.5px;
   line-height: 1.4;
   color: var(--ink-2);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .task-meta {

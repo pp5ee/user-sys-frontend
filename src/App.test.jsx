@@ -142,6 +142,22 @@ describe('团队任务台（React）', () => {
     await waitFor(() => expect(backend.state.lastQuery).toBe('老周'), { timeout: 2000 });
   });
 
+  it('列表里显示备注，搜索备注也能命中', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    const note = await screen.findByText('联调时注意旧会话的兼容。');
+    expect(note).toHaveClass('task-note');
+    expect(note).toHaveAttribute('title', '联调时注意旧会话的兼容。');
+
+    const search = screen.getByLabelText(/搜索任务/);
+    await user.type(search, '旧会话');
+
+    expect(screen.getByText('登录页联调')).toBeInTheDocument();
+    expect(screen.queryByText('80 端口静态挂载')).not.toBeInTheDocument();
+    await waitFor(() => expect(backend.state.lastQuery).toBe('旧会话'), { timeout: 2000 });
+  });
+
   it('「我负责的」只显示当前用户的任务', async () => {
     const { user } = setup(backend);
     await login(user);

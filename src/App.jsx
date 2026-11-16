@@ -248,6 +248,7 @@ export default function App() {
     if (!q) return true;
     return (
       String(task.title || '').toLowerCase().includes(q) ||
+      String(task.note || '').toLowerCase().includes(q) ||
       String(task.assignee || '').toLowerCase().includes(q) ||
       String(task.creator || '').toLowerCase().includes(q)
     );
