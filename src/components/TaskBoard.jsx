@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { STATUS_ORDER } from '../constants.js';
 import { avatarColor, todayLabel } from '../session.js';
+import CysicLogo from './CysicLogo.jsx';
 import TaskRow from './TaskRow.jsx';
 
 const EMPTY_COPY = {
@@ -78,9 +79,13 @@ export default function TaskBoard({
     <main className="shell" id="app">
       <header className="topbar">
         <div className="titleblock">
-          <p className="eyebrow" id="today">
-            {todayLabel()}
-          </p>
+          <div className="brand-line">
+            <CysicLogo size={20} withWordmark />
+            <span className="brand-divider" aria-hidden="true" />
+            <p className="eyebrow" id="today">
+              {todayLabel()}
+            </p>
+          </div>
           <h1>团队任务台</h1>
           <p className="sub" id="summary">
             {summary}
@@ -288,8 +293,13 @@ export default function TaskBoard({
       </section>
 
       <footer className={`foot${errorText ? ' is-off' : ''}`}>
-        <span className="dot-live" aria-hidden="true" />
-        <span id="foot-text">{errorText ? '接口未连接' : footer}</span>
+        <span className="foot-status">
+          <span className="dot-live" aria-hidden="true" />
+          <span id="foot-text">{errorText ? '接口未连接' : footer}</span>
+        </span>
+        <span className="foot-brand">
+          <CysicLogo size={13} withWordmark />
+        </span>
       </footer>
     </main>
   );

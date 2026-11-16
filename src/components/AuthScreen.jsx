@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import CysicLogo from './CysicLogo.jsx';
 import {
   DISPLAY_NAME_MAX,
   FIELD_LABEL,
@@ -101,16 +102,11 @@ export default function AuthScreen({ notice, onAuthenticated, onToast }) {
     <section id="auth" className="auth">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="auth-mark" aria-hidden="true">
-            <svg viewBox="0 0 20 20">
-              <path d="M4 10.5l4 4 8-9" />
-            </svg>
-          </span>
-          <div>
-            <p className="auth-eyebrow">团队任务台</p>
-            <h1 className="auth-title">{isRegister ? '注册' : '登录'}</h1>
-          </div>
+          <CysicLogo size={30} withWordmark />
+          <span className="brand-divider" aria-hidden="true" />
+          <p className="auth-eyebrow">团队任务台</p>
         </div>
+        <h1 className="auth-title">{isRegister ? '注册' : '登录'}</h1>
         <p className="auth-sub">
           {isRegister ? '创建一个账号，之后用它登录看团队任务。' : '登录后查看团队任务、新建任务和推进状态。'}
         </p>

@@ -3,6 +3,7 @@
 #
 #   ./deploy-frontend.sh
 #   SERVER=47.108.60.176 TARGET=/var/www/team-tasks ./deploy-frontend.sh
+#   SSH_KEY=~/.ssh/pp5ee ./deploy-frontend.sh  # 指定私钥（非交互环境用）
 #   DRY_RUN=1 ./deploy-frontend.sh     # 只打印会改动的文件
 #
 # 需要本机具备到服务器的 SSH 权限。注意：会用 rsync --delete 清掉目标目录里
@@ -14,6 +15,7 @@ USER_NAME="${USER_NAME:-root}"
 TARGET="${TARGET:-/var/www/team-tasks}"
 PORT="${PORT:-22}"
 NODE_BIN="${NODE_BIN:-node}"
+SSH_KEY="${SSH_KEY:-}"
 
 cd "$(dirname "$0")"
 
@@ -51,6 +53,9 @@ fi
 
 # accept-new：首次连接记下主机指纹，之后指纹变了就拒绝，避免中间人悄悄换服务器
 SSH_CMD="ssh -p ${PORT} -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o BatchMode=yes"
+if [ -n "$SSH_KEY" ]; then
+  SSH_CMD="$SSH_CMD -i $SSH_KEY -o IdentitiesOnly=yes"
+fi
 
 echo "==> 同步到 ${USER_NAME}@${SERVER}:${TARGET}"
 rsync "${RSYNC_OPTS[@]}" -e "$SSH_CMD" dist/ "${USER_NAME}@${SERVER}:${TARGET}/"
