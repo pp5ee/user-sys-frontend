@@ -1,19 +1,23 @@
 import { NEXT_STATUS, PRIORITY_LABEL, PREV_STATUS, STATUS_LABEL } from '../constants.js';
-import { avatarColor, fullTime, relativeTime } from '../session.js';
+import { isOverdue, toDateOnly } from '../due.js';
+import { avatarColor, relativeTime } from '../session.js';
 
 export default function TaskRow({ task, busy, isNew, onOpen, onChangeStatus }) {
   const next = NEXT_STATUS[task.status];
   const prev = PREV_STATUS[task.status];
   const note = typeof task.note === 'string' ? task.note.trim() : '';
+  const due = toDateOnly(task.due_on);
+  const overdue = isOverdue(task);
   const meta = [`#${task.id}`];
   if (task.creator) meta.push(`创建人 ${task.creator}`);
   if (task.updated_at) meta.push(`更新于 ${relativeTime(task.updated_at)}`);
 
   return (
     <li
-      className={`row${busy ? ' is-busy' : ''}${isNew ? ' is-new' : ''}`}
+      className={`row${busy ? ' is-busy' : ''}${isNew ? ' is-new' : ''}${overdue ? ' is-overdue' : ''}`}
       data-id={task.id}
       data-status={task.status}
+      data-overdue={overdue ? 'true' : undefined}
     >
       <div className="cell cell-title">
         <p className="task-title">
@@ -33,8 +37,19 @@ export default function TaskRow({ task, busy, isNew, onOpen, onChangeStatus }) {
             {note}
           </p>
         ) : null}
-        <p className="task-meta" title={task.updated_at ? fullTime(task.updated_at) : ''}>
+        <p className="task-meta">
           {meta.join(' · ')}
+          {due ? (
+            <>
+              {' · '}
+              <span
+                className={`task-due${overdue ? ' is-overdue' : ''}`}
+                title={overdue ? `截止日期 ${due}，已逾期` : `截止日期 ${due}`}
+              >
+                {overdue ? `已逾期 · ${due}` : `截止 ${due}`}
+              </span>
+            </>
+          ) : null}
         </p>
       </div>
 

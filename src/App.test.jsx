@@ -204,6 +204,64 @@ describe('团队任务台（React）', () => {
     expect(screen.getByRole('button', { name: '我负责的' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('列表显示截止日期，逾期且未完成的任务标出来', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    const future = backend.tasks.find((task) => task.id === 1).due_on;
+    const overdue = backend.tasks.find((task) => task.id === 2).due_on;
+    const donePast = backend.tasks.find((task) => task.id === 3).due_on;
+
+    expect(await screen.findByText(`截止 ${future}`)).toBeInTheDocument();
+    expect(screen.getByText(`已逾期 · ${overdue}`)).toBeInTheDocument();
+    // 已完成的旧任务不算逾期
+    expect(screen.queryByText(`已逾期 · ${donePast}`)).not.toBeInTheDocument();
+
+    expect(document.querySelector('li[data-id="2"]')).toHaveClass('is-overdue');
+    expect(document.querySelector('li[data-id="1"]')).not.toHaveClass('is-overdue');
+    expect(document.querySelector('li[data-id="3"]')).not.toHaveClass('is-overdue');
+  });
+
+  it('「只看逾期」走 overdue=true，只显示逾期未完成的任务', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    const button = screen.getByRole('button', { name: '只看逾期' });
+    await user.click(button);
+
+    await waitFor(() => expect(backend.state.lastOverdue).toBe(true));
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(screen.getByText(/逾期 1 条任务/)).toBeInTheDocument());
+    expect(screen.getByText('80 端口静态挂载')).toBeInTheDocument();
+    expect(screen.queryByText('登录页联调')).not.toBeInTheDocument();
+    expect(screen.queryByText('移动端排版')).not.toBeInTheDocument();
+
+    await user.click(button);
+    await waitFor(() => expect(backend.state.lastOverdue).toBe(false));
+    expect(await screen.findByText('登录页联调')).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('只看逾期和搜索同时生效时都带在接口参数里', async () => {
+    const { user } = setup(backend);
+    await login(user);
+
+    await user.click(screen.getByRole('button', { name: '只看逾期' }));
+    await user.type(screen.getByLabelText(/搜索任务/), '静态');
+
+    await waitFor(
+      () => {
+        const last = backend.state.calls.filter((call) => call.method === 'GET' && call.path === '/api/tasks').at(-1);
+        const params = new URLSearchParams(last.query);
+        expect(params.get('overdue')).toBe('true');
+        expect(params.get('q')).toBe('静态');
+      },
+      { timeout: 2000 }
+    );
+    expect(screen.getByText('80 端口静态挂载')).toBeInTheDocument();
+    expect(screen.queryByText('登录页联调')).not.toBeInTheDocument();
+  });
+
   it('点状态按钮推进任务状态', async () => {
     const { user } = setup(backend);
     await login(user);
@@ -323,11 +381,15 @@ describe('团队任务台（React）', () => {
     const dialog = await screen.findByRole('dialog');
 
     expect(await within(dialog).findByText('字段我这边按 q 做。')).toBeInTheDocument();
+    // 线上返回的是 author / author_name，作者名不能退化成「成员」
+    expect(within(dialog).getByText('老周')).toBeInTheDocument();
     const input = within(dialog).getByPlaceholderText(/写点进展/);
     await user.type(input, 'Swagger 已核对完{Enter}');
 
     expect(await within(dialog).findByText('Swagger 已核对完')).toBeInTheDocument();
     expect(backend.comments[1]).toHaveLength(2);
+    // 发出去的字段必须是 body（content 会被线上接口 422 拒绝）
+    expect(backend.comments[1][1]).toMatchObject({ author_name: 'BBSee', body: 'Swagger 已核对完' });
   });
 
   it('删除任务需要二次确认', async () => {

@@ -320,6 +320,22 @@ h1 {
   font-weight: 600;
 }
 
+.filter-chip .chip-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-chip[aria-pressed="true"] .chip-count { background: #f6ded9; color: var(--danger); }
+
 .search {
   display: inline-flex;
   align-items: center;
@@ -478,6 +494,11 @@ h1 {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
+
+.task-due { color: var(--ink-2); }
+.task-due.is-overdue { color: var(--danger); font-weight: 600; }
+.row.is-overdue { box-shadow: inset 3px 0 0 var(--danger); }
+.row.is-overdue:hover { background: #fdf3f0; }
 
 .cell-assignee { display: flex; align-items: center; gap: 8px; }
 

@@ -142,6 +142,7 @@ export function createApi() {
     list(params = {}) {
       const query = new URLSearchParams();
       if (params.q) query.set('q', params.q);
+      if (params.overdue) query.set('overdue', 'true');
       const suffix = query.toString();
       return request('/api/tasks' + (suffix ? `?${suffix}` : ''));
     },
@@ -165,10 +166,11 @@ export function createApi() {
     comments(taskId) {
       return request(`/api/tasks/${encodeURIComponent(taskId)}/comments`);
     },
-    addComment(taskId, content) {
+    addComment(taskId, text) {
+      // 线上评论接口只认 `body`；传 `content` 会 422（Unknown fields: content）。
       return request(`/api/tasks/${encodeURIComponent(taskId)}/comments`, {
         method: 'POST',
-        body: JSON.stringify({ content: String(content).slice(0, COMMENT_MAX) }),
+        body: JSON.stringify({ body: String(text).slice(0, COMMENT_MAX) }),
       });
     },
 

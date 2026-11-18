@@ -21,16 +21,25 @@ function extractComments(body) {
 function commentAuthor(comment) {
   const source = comment && comment.user && typeof comment.user === 'object' ? comment.user : comment;
   const name = String(
-    source.display_name || source.displayName || source.username || comment?.display_name || comment?.username || '成员'
+    source.display_name ||
+      source.displayName ||
+      source.author_name ||
+      source.author ||
+      source.username ||
+      comment?.display_name ||
+      comment?.author_name ||
+      comment?.username ||
+      comment?.author ||
+      '成员'
   ).trim();
   return {
     name: name || '成员',
-    username: String(source.username || comment?.username || '').trim(),
+    username: String(source.username || source.author || comment?.username || comment?.author || '').trim(),
   };
 }
 
 function commentText(comment) {
-  return String(comment?.content ?? comment?.body ?? comment?.text ?? '').trim();
+  return String(comment?.body ?? comment?.content ?? comment?.text ?? '').trim();
 }
 
 export default function TaskDetailDialog({
@@ -262,7 +271,8 @@ export default function TaskDetailDialog({
         return;
       }
       const fields = err.fields || {};
-      onToast?.(fields.content ? `留言${translateFieldMessage(fields.content)}` : err.message || '发送失败', 'error');
+      const fieldMessage = fields.body || fields.content;
+      onToast?.(fieldMessage ? `留言${translateFieldMessage(fieldMessage)}` : err.message || '发送失败', 'error');
     } finally {
       setSending(false);
     }

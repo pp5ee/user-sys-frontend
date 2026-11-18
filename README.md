@@ -1,6 +1,6 @@
 # 团队任务台 · 前端（React）
 
-给一个小组看今天有哪些事、谁在做、做到哪了。登录后看任务列表，可以搜索、新建任务、点开任务编辑标题 / 负责人 / 优先级 / 状态，也可以把任务指派给自己、在任务里讨论、复制任务链接分享给同事。
+给一个小组看今天有哪些事、谁在做、做到哪了。登录后看任务列表，可以搜索、新建任务、点开任务编辑标题 / 负责人 / 优先级 / 状态，也可以把任务指派给自己、在任务里讨论、复制任务链接分享给同事。列表里会显示截止日期，逾期未完成的任务会标红，也可以打开「只看逾期」让接口只返回这部分任务。
 
 技术栈：React 19 + Vite 6，样式是原来的纯 CSS（`src/styles.css`），没有 UI 框架依赖。
 
@@ -31,10 +31,10 @@ npm run preview  # 预览 dist/
 ## 测试
 
 ```bash
-npm test         # Vitest + jsdom + Testing Library，31 个用例（含安全回归）
+npm test         # Vitest + jsdom + Testing Library，44 个用例（含安全回归）
 ```
 
-用例在 `src/App.test.jsx`，走真实的 `src/api.js`，用 `src/test/backend.js` 里的假后端模拟接口语义（登录 / 注册 / 401 / q 搜索 / 任务 CRUD / 评论 / 权限）。
+用例在 `src/App.test.jsx`，走真实的 `src/api.js`，用 `src/test/backend.js` 里的假后端模拟接口语义（登录 / 注册 / 401 / q 搜索 / overdue 过滤 / 任务 CRUD / 评论 / 权限）。`src/due.test.js` 单独覆盖截止日期和逾期判断的边界。
 
 真实浏览器端到端（Playwright，对着本地 mock 后端 + `dist` 静态服务）：
 
@@ -117,9 +117,9 @@ add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" alway
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/tasks/{id}/comments` | 讨论列表，返回 `{ items, total }` |
-| POST | `/api/tasks/{id}/comments` | 发一条讨论，入参 `{content}`（1–1000 字），返回 201 + Comment |
+| POST | `/api/tasks/{id}/comments` | 发一条讨论，入参 `{body}`（1–1000 字），返回 201 + Comment |
 
-Comment 字段：`id`、`task_id`、`user_id`、`username`、`display_name`、`content`、`created_at`。前端也兼容 `content` 之外的 `body` / `text`，以及嵌套的 `user` 对象。
+Comment 字段：`id`、`task_id`、`user_id`、`author`（账号）、`author_name`（显示名）、`body`、`created_at`。线上接口只认 `body`，传旧字段 `content` 会返回 422；前端读取时兼容 `content` / `text` 以及嵌套的 `user` 对象。
 
 这两个接口还没上线时（404/405/501），任务详情里的讨论区会显示一条占位说明并隐藏输入框；后端上线后刷新即可用，不需要改前端。
 

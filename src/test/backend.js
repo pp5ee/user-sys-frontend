@@ -3,12 +3,21 @@
  * fetch 被 stub 后，前端真实的请求层（src/api.js）走完整流程。
  */
 
+import { isOverdue, localDateISO } from '../due.js';
+
 function json(status, body) {
   return {
     ok: status >= 200 && status < 300,
     status,
     text: async () => (body === undefined ? '' : JSON.stringify(body)),
   };
+}
+
+/** 相对今天偏移几天的 `YYYY-MM-DD`，避免用例写死日期后过期。 */
+export function dayFromToday(offset) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return localDateISO(date);
 }
 
 export function createBackend(overrides = {}) {
@@ -25,6 +34,7 @@ export function createBackend(overrides = {}) {
       priority: 'high',
       status: 'doing',
       note: '联调时注意旧会话的兼容。',
+      due_on: dayFromToday(3),
       created_by: 1,
       creator: 'bbsee',
       created_at: '2026-11-14T10:00:00Z',
@@ -37,6 +47,7 @@ export function createBackend(overrides = {}) {
       assignee: '老周',
       priority: 'medium',
       status: 'todo',
+      due_on: dayFromToday(-2),
       created_by: 2,
       creator: 'zhou',
       created_at: '2026-11-14T09:00:00Z',
@@ -49,6 +60,7 @@ export function createBackend(overrides = {}) {
       assignee: '阿哲',
       priority: 'low',
       status: 'done',
+      due_on: dayFromToday(-5),
       created_by: null,
       creator: null,
       created_at: '2026-11-13T09:00:00Z',
@@ -56,13 +68,26 @@ export function createBackend(overrides = {}) {
       comment_count: 0,
     },
   ];
-  const comments = { 1: [{ id: 11, username: 'zhou', display_name: '老周', content: '字段我这边按 q 做。', created_at: '2026-11-14T10:30:00Z' }] };
+  const comments = {
+    1: [
+      {
+        id: 11,
+        task_id: 1,
+        user_id: 2,
+        author: 'zhou',
+        author_name: '老周',
+        body: '字段我这边按 q 做。',
+        created_at: '2026-11-14T10:30:00Z',
+      },
+    ],
+  };
 
   const state = {
     auth: 'ok', // ok | 404
     sessions: { 'tok-bbsee': users[0] },
     taskMode: 'ok',
     lastQuery: null,
+    lastOverdue: null,
     calls: [],
   };
 
@@ -116,14 +141,17 @@ export function createBackend(overrides = {}) {
       if (!me && requireAuth) return json(401, { error: { message: 'unauthorized' } });
       if (state.taskMode === 'error') return json(500, { error: { message: '服务器开小差了' } });
       const q = parsed.searchParams.get('q');
+      const overdueOnly = parsed.searchParams.get('overdue') === 'true';
       state.lastQuery = q;
-      const list = q
-        ? tasks.filter((task) =>
-            [task.title, task.note, task.assignee, task.creator].some((value) =>
-              String(value || '').toLowerCase().includes(q.toLowerCase())
-            )
+      state.lastOverdue = overdueOnly;
+      let list = overdueOnly ? tasks.filter((task) => isOverdue(task)) : tasks;
+      if (q) {
+        list = list.filter((task) =>
+          [task.title, task.note, task.assignee, task.creator].some((value) =>
+            String(value || '').toLowerCase().includes(q.toLowerCase())
           )
-        : tasks;
+        );
+      }
       return json(200, { items: list.map((task) => ({ ...task })), total: list.length });
     }
 
@@ -143,6 +171,7 @@ export function createBackend(overrides = {}) {
       };
       // 和真实后端一致：没传 note 就不存这个字段
       if (body.note) task.note = body.note;
+      if (body.due_on) task.due_on = body.due_on;
       tasks.unshift(task);
       return json(201, task);
     }
@@ -177,13 +206,21 @@ export function createBackend(overrides = {}) {
         return json(200, { items, total: items.length });
       }
       if (method === 'POST') {
-        if (!body.content) return json(422, { error: { message: 'invalid', fields: { content: 'is required' } } });
+        // 线上接口只认 `body`，传 `content` 会 422（Unknown fields: content）
+        if ('content' in body) {
+          return json(422, { error: { message: 'Unknown fields: content', fields: { content: 'is not a known field' } } });
+        }
+        if (!String(body.body || '').trim()) {
+          return json(422, { error: { message: 'Field must not be empty: body', fields: { body: 'must not be empty' } } });
+        }
         const list = comments[taskId] || (comments[taskId] = []);
         const item = {
           id: 100 + list.length,
-          username: me.username,
-          display_name: me.display_name,
-          content: body.content,
+          task_id: taskId,
+          user_id: me.id,
+          author: me.username,
+          author_name: me.display_name,
+          body: String(body.body).trim(),
           created_at: new Date().toISOString(),
         };
         list.push(item);

@@ -7,6 +7,7 @@ import TaskRow from './TaskRow.jsx';
 const EMPTY_COPY = {
   none: ['这里还没有任务', '点右上角「新建任务」，把今天要做的事记下来。'],
   mine: ['没有分给你的任务', '新建任务时把负责人填成自己，或者等同事指派给你。'],
+  overdue: ['没有逾期的任务', '未完成的任务里，截止日期都还没到。'],
   filtered: ['没有符合条件的任务', '换个筛选条件，或者清空搜索试试。'],
 };
 
@@ -25,6 +26,9 @@ export default function TaskBoard({
   onQuery,
   mine,
   onMine,
+  overdue,
+  onOverdue,
+  overdueCount,
   busy,
   flashId,
   footer,
@@ -47,14 +51,20 @@ export default function TaskBoard({
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (trimmed) {
+    if (overdue) {
+      setSummary(
+        trimmed
+          ? `搜索「${trimmed}」匹配 ${visibleTasks.length} 条逾期任务`
+          : `逾期 ${visibleTasks.length} 条任务 · 待办 ${counts.todo} · 进行中 ${counts.doing}`
+      );
+    } else if (trimmed) {
       setSummary(`搜索「${trimmed}」匹配 ${visibleTasks.length} 条任务`);
     } else if (tasks.length) {
       setSummary(`共 ${counts.all} 条任务 · 待办 ${counts.todo} · 进行中 ${counts.doing} · 完成 ${counts.done}`);
     } else if (!loading) {
       setSummary('看今天有哪些事、谁在做、做到哪了。');
     }
-  }, [query, visibleTasks.length, tasks.length, counts, loading]);
+  }, [query, overdue, visibleTasks.length, tasks.length, counts, loading]);
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -73,7 +83,13 @@ export default function TaskBoard({
   const showKbd = !showClear && !searchFocused;
 
   const isEmpty = !loading && !errorText && visibleTasks.length === 0;
-  const emptyCopy = tasks.length === 0 ? EMPTY_COPY.none : mine ? EMPTY_COPY.mine : EMPTY_COPY.filtered;
+  const emptyCopy = overdue
+    ? EMPTY_COPY.overdue
+    : tasks.length === 0
+      ? EMPTY_COPY.none
+      : mine
+        ? EMPTY_COPY.mine
+        : EMPTY_COPY.filtered;
 
   return (
     <main className="shell" id="app">
@@ -179,6 +195,26 @@ export default function TaskBoard({
               我负责的
             </button>
           ) : null}
+          <button
+            className="filter-chip"
+            id="overdue-filter"
+            type="button"
+            aria-pressed={overdue}
+            aria-label="只看逾期"
+            title="只看已过截止日期、还没完成的任务"
+            onClick={onOverdue}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="10" r="7" />
+              <path d="M10 6v4.2l2.8 1.7" />
+            </svg>
+            只看逾期
+            {overdueCount ? (
+              <span className="chip-count" aria-hidden="true">
+                {overdueCount}
+              </span>
+            ) : null}
+          </button>
           <div className="search" id="search-box">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <circle cx="9" cy="9" r="5.5" />

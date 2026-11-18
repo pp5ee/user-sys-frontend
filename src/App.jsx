@@ -9,6 +9,7 @@ import {
   SEARCH_DEBOUNCE,
 } from './constants.js';
 import { matchesQuery } from './search.js';
+import { isOverdue } from './due.js';
 import {
   clearSession,
   extractItems,
@@ -32,6 +33,7 @@ export default function App() {
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [mine, setMine] = useState(false);
+  const [overdue, setOverdue] = useState(false);
   const [busy, setBusy] = useState(() => new Set());
   const [users, setUsers] = useState([]);
   const [detailId, setDetailId] = useState(null);
@@ -41,6 +43,7 @@ export default function App() {
 
   const tokenRef = useRef('');
   const queryRef = useRef('');
+  const overdueRef = useRef(false);
   const authModeRef = useRef('checking');
   const seqRef = useRef(0);
   const usersLoadedRef = useRef(false);
@@ -49,6 +52,7 @@ export default function App() {
   const flashTimer = useRef(0);
 
   authModeRef.current = authMode;
+  overdueRef.current = overdue;
 
   /* ---------------- toast ---------------- */
 
@@ -76,6 +80,7 @@ export default function App() {
       setTasks([]);
       setQuery('');
       setMine(false);
+      setOverdue(false);
       setFilter('all');
       setUsers([]);
       usersLoadedRef.current = false;
@@ -167,6 +172,9 @@ export default function App() {
     if (mode !== 'ready' && mode !== 'unavailable') return;
 
     const q = queryRef.current.trim();
+    const params = {};
+    if (q) params.q = q;
+    if (overdueRef.current) params.overdue = true;
     const seq = ++seqRef.current;
     if (!quiet) {
       setLoading(true);
@@ -174,7 +182,7 @@ export default function App() {
     }
 
     try {
-      const data = await api.list(q ? { q } : {});
+      const data = await api.list(params);
       if (seq !== seqRef.current) return;
       if (q !== queryRef.current.trim()) return;
       setTasks(extractItems(data));
@@ -227,16 +235,29 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [query, load]);
 
+  /* 只看逾期走服务端 `overdue=true`，切换后立刻重拉；列表本身也会在本地先收一遍。 */
+  const overdueMounted = useRef(false);
+  useEffect(() => {
+    if (!overdueMounted.current) {
+      overdueMounted.current = true;
+      return undefined;
+    }
+    load({ quiet: true });
+  }, [overdue, load]);
+
   /* ---------------- 列表派生 ---------------- */
 
   const myLabel = user ? String(user.displayName || user.username || '').trim() : '';
 
-  const counts = { all: tasks.length, todo: 0, doing: 0, done: 0 };
-  for (const task of tasks) {
+  const overdueTasks = tasks.filter((task) => isOverdue(task));
+  const baseTasks = overdue ? overdueTasks : tasks;
+
+  const counts = { all: baseTasks.length, todo: 0, doing: 0, done: 0 };
+  for (const task of baseTasks) {
     if (counts[task.status] !== undefined) counts[task.status] += 1;
   }
 
-  const visibleTasks = tasks.filter((task) => {
+  const visibleTasks = baseTasks.filter((task) => {
     if (filter !== 'all' && task.status !== filter) return false;
     if (mine) {
       const assignee = String(task.assignee || '').trim();
@@ -296,11 +317,12 @@ export default function App() {
   function handleCreated(body) {
     const task = body && typeof body === 'object' && body.data && typeof body.data === 'object' ? body.data : body;
     if (!task || typeof task !== 'object') return;
-    const wasFiltered = Boolean(query.trim()) || mine;
+    const wasFiltered = Boolean(query.trim()) || mine || overdue;
     setTasks((prev) => [task, ...prev.filter((item) => String(item.id) !== String(task.id))]);
     setFilter('all');
     setQuery('');
     setMine(false);
+    setOverdue(false);
     flash(task.id);
     if (wasFiltered) load({ quiet: true });
   }
@@ -497,6 +519,9 @@ export default function App() {
           onQuery={setQuery}
           mine={mine}
           onMine={() => setMine((prev) => !prev)}
+          overdue={overdue}
+          onOverdue={() => setOverdue((prev) => !prev)}
+          overdueCount={overdueTasks.length}
           busy={busy}
           flashId={flashId}
           footer={footer}
